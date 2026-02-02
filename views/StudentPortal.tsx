@@ -29,7 +29,6 @@ export const StudentPortal: React.FC = () => {
   const [message, setMessage] = useState('');
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
   
-  // Camera Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -62,7 +61,7 @@ export const StudentPortal: React.FC = () => {
       const context = canvasRef.current.getContext('2d');
       if (context) {
         context.drawImage(videoRef.current, 0, 0, 300, 300);
-        return canvasRef.current.toDataURL('image/jpeg', 0.6);
+        return canvasRef.current.toDataURL('image/jpeg', 0.5);
       }
     }
     return undefined;
@@ -73,7 +72,7 @@ export const StudentPortal: React.FC = () => {
     performAttendanceCheck();
   };
 
-  const performAttendanceCheck = () => {
+  const performAttendanceCheck = async () => {
     setLoading(true);
     setStatus('idle');
     setMessage('');
@@ -90,14 +89,14 @@ export const StudentPortal: React.FC = () => {
     
     if (lockedMatric && lockedMatric.toUpperCase() !== matricNo.toUpperCase()) {
       setStatus('error');
-      setMessage(`Security Alert: This device is already locked to ${lockedMatric}. Only one student per device.`);
+      setMessage(`Security Alert: This device is locked to ${lockedMatric}.`);
       setLoading(false);
       return;
     }
 
     if (sessionKey.toUpperCase() !== activeSession.sessionKey) {
       setStatus('error');
-      setMessage('Incorrect Session Key.');
+      setMessage('Incorrect Session Key. Check with your lecturer.');
       setLoading(false);
       return;
     }
@@ -105,88 +104,88 @@ export const StudentPortal: React.FC = () => {
     const faceImage = captureImage();
     if (!faceImage && cameraActive) {
       setStatus('error');
-      setMessage('Face verification failed. Ensure your face is visible to the camera.');
+      setMessage('Face capture failed. Please ensure camera is allowed.');
       setLoading(false);
       return;
     }
 
-    // ROBUST LOCATION HANDLER
-    const getLocation = (useHighAccuracy: boolean, timeout: number) => {
+    // 3-STAGE LOCATION LOGIC (Fixed for Indoor reliability)
+    const getLocation = (useHighAccuracy: boolean, timeout: number, maxAge: number) => {
       return new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: useHighAccuracy,
           timeout: timeout,
-          maximumAge: useHighAccuracy ? 0 : 60000
+          maximumAge: maxAge
         });
       });
     };
 
-    // Multi-stage Attempt
-    (async () => {
-      let position: GeolocationPosition;
+    let position: GeolocationPosition | null = null;
+
+    try {
+      // Attempt 1: High Accuracy (GPS)
+      position = await getLocation(true, 10000, 0);
+    } catch (e) {
       try {
-        // Stage 1: Fast High-Accuracy attempt
-        position = await getLocation(true, 7000);
-      } catch (err) {
-        try {
-          // Stage 2: Fallback to Low-Accuracy (Cell/Wi-Fi) - Much more reliable indoors
-          console.log("Falling back to low accuracy location...");
-          position = await getLocation(false, 10000);
-        } catch (finalErr) {
-          setStatus('error');
-          setMessage('Location failure: GPS/Network signal too weak indoors. Please step closer to a window or exit.');
-          setLoading(false);
-          return;
-        }
-      }
-
-      const distance = getDistanceInMeters(
-        position.coords.latitude,
-        position.coords.longitude,
-        activeSession.location.lat,
-        activeSession.location.lng
-      );
-      
-      const allowedRadius = activeSession.radius + 60; // Slightly increased buffer for indoor drift
-      
-      if (distance > allowedRadius) {
-         setStatus('error');
-         setMessage(`Outside lecture range (${Math.round(distance)}m away). Please move closer.`);
-         setLoading(false);
-         return;
-      }
-
-      const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-      const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo.toUpperCase() === matricNo.toUpperCase());
-      
-      if (alreadySubmitted) {
+        // Attempt 2: Low Accuracy (Network/Cell) - Much more reliable for indoors
+        console.warn("GPS timed out, trying network positioning...");
+        position = await getLocation(false, 15000, 30000);
+      } catch (e2) {
         setStatus('error');
-        setMessage('Attendance already logged.');
+        setMessage('Location error: Unable to fix position. If you are indoors, try moving closer to a window.');
         setLoading(false);
         return;
       }
+    }
 
-      const newRecord: AttendanceRecord = {
-        id: Math.random().toString(36).substr(2, 9),
-        sessionId: sessionId!,
-        studentName: name,
-        matricNo: matricNo.toUpperCase(),
-        department: department,
-        timestamp: Date.now(),
-        faceImage: faceImage,
-        location: {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        }
-      };
+    if (!position) return;
 
-      localStorage.setItem('attendx_records', JSON.stringify([...records, newRecord]));
-      localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
-      
-      setStatus('success');
-      setMessage(`Attendance successfully logged for ${name}!`);
+    const distance = getDistanceInMeters(
+      position.coords.latitude,
+      position.coords.longitude,
+      activeSession.location.lat,
+      activeSession.location.lng
+    );
+    
+    const allowedRadius = activeSession.radius + 75; // 75m buffer for indoor accuracy drift
+    
+    if (distance > allowedRadius) {
+       setStatus('error');
+       setMessage(`Too far from lecture hall (${Math.round(distance)}m). You must be present in class.`);
+       setLoading(false);
+       return;
+    }
+
+    const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+    const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo.toUpperCase() === matricNo.toUpperCase());
+    
+    if (alreadySubmitted) {
+      setStatus('error');
+      setMessage('Attendance already recorded.');
       setLoading(false);
-    })();
+      return;
+    }
+
+    const newRecord: AttendanceRecord = {
+      id: Math.random().toString(36).substr(2, 9),
+      sessionId: sessionId!,
+      studentName: name,
+      matricNo: matricNo.toUpperCase(),
+      department: department,
+      timestamp: Date.now(),
+      faceImage: faceImage,
+      location: {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      }
+    };
+
+    localStorage.setItem('attendx_records', JSON.stringify([...records, newRecord]));
+    localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
+    
+    setStatus('success');
+    setMessage(`Verified! Attendance logged for ${name}.`);
+    setLoading(false);
   };
 
   if (!activeSession) {
@@ -194,8 +193,8 @@ export const StudentPortal: React.FC = () => {
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm">
           <i className="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
-          <h2 className="text-xl font-bold text-gray-800">Invalid Link</h2>
-          <button onClick={() => window.location.reload()} className="mt-6 text-blue-600 font-bold">Retry</button>
+          <h2 className="text-xl font-bold">Session Unavailable</h2>
+          <button onClick={() => window.location.reload()} className="mt-6 text-blue-600 font-bold uppercase text-xs tracking-widest">Retry Connection</button>
         </div>
       </div>
     );
@@ -205,10 +204,10 @@ export const StudentPortal: React.FC = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 md:p-8">
       <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100">
         <div className="bg-blue-600 p-6 text-white text-center">
-          <h1 className="text-xl font-black uppercase tracking-tight">Attendance Verification</h1>
+          <h1 className="text-xl font-black uppercase tracking-tight">Institutional Attendance</h1>
           <div className="mt-2 inline-flex items-center space-x-2 bg-blue-700 px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest text-blue-100">
-             <i className="fas fa-video"></i>
-             <span>Biometric + Location Auth Active</span>
+             <i className="fas fa-shield-alt"></i>
+             <span>Identity + Location Guard Active</span>
           </div>
         </div>
 
@@ -218,7 +217,7 @@ export const StudentPortal: React.FC = () => {
               <div className="bg-green-100 text-green-600 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <i className="fas fa-check text-4xl"></i>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">Successfully Verified</h2>
+              <h2 className="text-2xl font-bold text-gray-900">Logged Successfully</h2>
               <p className="text-gray-600 px-4">{message}</p>
             </div>
           ) : (
@@ -228,7 +227,7 @@ export const StudentPortal: React.FC = () => {
                 {!cameraActive && (
                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-4 text-center">
                       <i className="fas fa-camera-slash text-2xl mb-2 opacity-50"></i>
-                      <p className="text-[10px] uppercase font-bold text-gray-400">Enable Camera Access</p>
+                      <p className="text-[10px] uppercase font-bold text-gray-400">Allow Camera access</p>
                    </div>
                 )}
                 <video 
@@ -238,13 +237,12 @@ export const StudentPortal: React.FC = () => {
                   muted 
                   className="w-full h-full object-cover grayscale brightness-110 contrast-125"
                 />
-                <div className="absolute inset-0 border-[20px] border-black/10 pointer-events-none"></div>
                 <div className="absolute top-4 left-4 border-l-2 border-t-2 border-blue-400 w-4 h-4"></div>
                 <div className="absolute top-4 right-4 border-r-2 border-t-2 border-blue-400 w-4 h-4"></div>
                 <div className="absolute bottom-4 left-4 border-l-2 border-b-2 border-blue-400 w-4 h-4"></div>
                 <div className="absolute bottom-4 right-4 border-r-2 border-b-2 border-blue-400 w-4 h-4"></div>
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                   <div className="w-full h-[1px] bg-blue-500/30 animate-pulse"></div>
+                   <div className="w-full h-[1px] bg-blue-500/20 animate-pulse"></div>
                 </div>
                 <canvas ref={canvasRef} width="300" height="300" className="hidden" />
               </div>
@@ -255,7 +253,7 @@ export const StudentPortal: React.FC = () => {
                   <input
                     type="text" required value={name} onChange={(e) => setName(e.target.value)}
                     className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                    placeholder="Jane Doe"
+                    placeholder="e.g. Jane Doe"
                   />
                 </div>
                 <div>
@@ -263,7 +261,7 @@ export const StudentPortal: React.FC = () => {
                   <input
                     type="text" required value={matricNo} onChange={(e) => setMatricNo(e.target.value)}
                     className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                    placeholder="ENG/21/0001"
+                    placeholder="ENG/21/0000"
                   />
                 </div>
               </div>
@@ -271,7 +269,11 @@ export const StudentPortal: React.FC = () => {
               <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100">
                 <label className="block text-center text-[10px] font-black text-blue-500 uppercase tracking-widest mb-2">Lecture Key</label>
                 <input
-                  type="text" required maxLength={6} value={sessionKey} onChange={(e) => setSessionKey(e.target.toUpperCase())}
+                  type="text" 
+                  required 
+                  maxLength={6} 
+                  value={sessionKey} 
+                  onChange={(e) => setSessionKey(e.target.value.toUpperCase())}
                   className="w-full text-center text-3xl font-black tracking-[0.4em] py-3 bg-white border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 outline-none transition-all text-blue-700"
                   placeholder="------"
                 />
@@ -290,7 +292,7 @@ export const StudentPortal: React.FC = () => {
                 type="submit" disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center space-x-3 text-sm uppercase tracking-widest"
               >
-                {loading ? <i className="fas fa-sync-alt fa-spin"></i> : <span>Verify & Log Attendance</span>}
+                {loading ? <i className="fas fa-sync-alt fa-spin"></i> : <span>Verify Presence</span>}
               </button>
             </form>
           )}
@@ -298,7 +300,7 @@ export const StudentPortal: React.FC = () => {
       </div>
 
       <div className="mt-8 text-center space-y-2">
-        <p className="text-gray-400 text-[9px] font-bold uppercase tracking-widest">Geo-Fencing + Biometrics Secured</p>
+        <p className="text-gray-400 text-[9px] font-bold uppercase tracking-widest">Institutional Anti-Fraud Protocol Active</p>
         <p className="text-blue-600 text-[10px] font-black uppercase tracking-[0.2em] opacity-70">Engineered by SIENA Group</p>
       </div>
     </div>
