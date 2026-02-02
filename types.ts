@@ -26,12 +26,12 @@ export interface AttendanceSession {
   level: string;
   sessionKey: string;
   startTime: number;
-  endTime?: number; // Added to mark past sessions
+  endTime?: number;
   location: {
     lat: number;
     lng: number;
   };
-  radius: number; // in meters
+  radius: number;
   active: boolean;
 }
 
@@ -42,6 +42,7 @@ export interface AttendanceRecord {
   matricNo: string;
   department: string;
   timestamp: number;
+  faceImage?: string; // Base64 image data
   location: {
     lat: number;
     lng: number;

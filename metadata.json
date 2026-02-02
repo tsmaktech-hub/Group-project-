@@ -2,6 +2,7 @@
   "name": "AttendX - Institutional Attendance System",
   "description": "A high-performance attendance management system for higher institutions with geo-fencing, session-key security, and real-time tracking for the 75% attendance threshold.",
   "requestFramePermissions": [
-    "geolocation"
+    "geolocation",
+    "camera"
   ]
 }
