@@ -109,7 +109,6 @@ export const StudentPortal: React.FC = () => {
       return;
     }
 
-    // 3-STAGE LOCATION LOGIC (Fixed for Indoor reliability)
     const getLocation = (useHighAccuracy: boolean, timeout: number, maxAge: number) => {
       return new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -123,11 +122,9 @@ export const StudentPortal: React.FC = () => {
     let position: GeolocationPosition | null = null;
 
     try {
-      // Attempt 1: High Accuracy (GPS)
       position = await getLocation(true, 10000, 0);
     } catch (e) {
       try {
-        // Attempt 2: Low Accuracy (Network/Cell) - Much more reliable for indoors
         console.warn("GPS timed out, trying network positioning...");
         position = await getLocation(false, 15000, 30000);
       } catch (e2) {
@@ -147,7 +144,7 @@ export const StudentPortal: React.FC = () => {
       activeSession.location.lng
     );
     
-    const allowedRadius = activeSession.radius + 75; // 75m buffer for indoor accuracy drift
+    const allowedRadius = activeSession.radius + 75; 
     
     if (distance > allowedRadius) {
        setStatus('error');
@@ -222,7 +219,6 @@ export const StudentPortal: React.FC = () => {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Camera Viewfinder */}
               <div className="relative group overflow-hidden rounded-2xl bg-black aspect-square max-w-[200px] mx-auto border-4 border-gray-100 shadow-inner">
                 {!cameraActive && (
                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-4 text-center">
@@ -274,7 +270,7 @@ export const StudentPortal: React.FC = () => {
                   maxLength={6} 
                   value={sessionKey} 
                   onChange={(e) => setSessionKey(e.target.value.toUpperCase())}
-                  className="w-full text-center text-3xl font-black tracking-[0.4em] py-3 bg-white border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 outline-none transition-all text-blue-700"
+                  className="w-full text-center text-3xl font-black tracking-[0.4em] py-3 bg-white border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 outline-none transition-all text-blue-700 uppercase"
                   placeholder="------"
                 />
               </div>

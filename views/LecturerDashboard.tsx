@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { User, AttendanceSession } from '../types';
 import { DEPARTMENTS, COURSES, LEVELS, GEOCONFIG } from '../constants';
+import { ResetConfirmation } from '../components/ResetConfirmation';
 
 interface LecturerDashboardProps {
   user: User | null;
@@ -17,6 +18,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
   const [selectedCourse, setSelectedCourse] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
 
   const filteredCourses = COURSES.filter(c => c.deptId === selectedDept);
 
@@ -64,6 +66,19 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
         setLoading(false);
       }
     );
+  };
+
+  const handleGlobalReset = () => {
+    localStorage.removeItem('attendx_records');
+    localStorage.removeItem('attendx_sessions');
+    // Also clear individual session locks to be thorough
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('attendx_lock_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    setShowResetModal(false);
+    window.location.reload(); // Refresh to clear states
   };
 
   return (
@@ -209,21 +224,46 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
                 <span className="text-blue-700 font-bold">75% Attendance</span>
               </div>
               <p className="text-xs text-gray-500 leading-relaxed">
-                As per Senate regulation, students who fail to meet the 75% attendance threshold are strictly ineligible for semester examinations. Use the Audit tool to generate official lists.
+                As per Senate regulation, students who fail to meet the 75% attendance threshold are strictly ineligible for semester examinations.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border p-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
+              <i className="fas fa-cog text-gray-400 mr-2"></i>
+              System Control
+            </h3>
+            <div className="space-y-3">
+              <button 
+                onClick={() => setShowResetModal(true)}
+                className="w-full flex items-center justify-center space-x-2 py-3 border-2 border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors text-xs uppercase tracking-widest"
+              >
+                <i className="fas fa-trash-alt"></i>
+                <span>Reset New Semester</span>
+              </button>
+              <p className="text-[10px] text-gray-400 text-center px-4 leading-tight italic">
+                Clears all current session and attendance records for a fresh semester start.
               </p>
             </div>
           </div>
 
           <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl shadow-lg p-6 text-white">
-            <h3 className="text-lg font-bold mb-2 text-blue-100">Live Dashboard</h3>
-            <p className="text-sm mb-4">Active sessions appear in real-time as students submit. Ensure you are within the classroom geofence.</p>
+            <h3 className="text-lg font-bold mb-2 text-blue-100">Live Status</h3>
             <div className="animate-pulse flex items-center space-x-2 text-xs font-bold text-blue-200">
               <div className="w-2 h-2 bg-red-400 rounded-full"></div>
-              <span>READY FOR SESSIONS</span>
+              <span>MONITORING ACTIVE</span>
             </div>
           </div>
         </div>
       </div>
+
+      <ResetConfirmation 
+        isOpen={showResetModal}
+        onClose={() => setShowResetModal(false)}
+        onConfirm={handleGlobalReset}
+        user={user}
+      />
     </Layout>
   );
 };
