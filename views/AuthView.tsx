@@ -122,6 +122,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
           </p>
         </div>
       </div>
+      <p className="mt-8 text-blue-600 text-xs font-bold uppercase tracking-widest opacity-60">
+        Engineered by SIENA Group
+      </p>
     </div>
   );
 };

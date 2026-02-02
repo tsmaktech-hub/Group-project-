@@ -262,8 +262,9 @@ export const StudentPortal: React.FC = () => {
         </div>
       </div>
 
-      <div className="mt-8 text-center text-gray-400 text-xs font-medium space-y-1">
-        <p>Geo-fencing active with indoor tolerance. Must reach 75% for exam eligibility.</p>
+      <div className="mt-8 text-center space-y-2">
+        <p className="text-gray-400 text-xs font-medium">Geo-fencing active with indoor tolerance. Must reach 75% for exam eligibility.</p>
+        <p className="text-blue-600 text-[10px] font-black uppercase tracking-[0.2em] opacity-70">Engineered by SIENA Group</p>
       </div>
     </div>
   );

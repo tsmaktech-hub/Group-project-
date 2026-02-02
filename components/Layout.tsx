@@ -35,8 +35,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, title, onLogout, showL
         {children}
       </main>
       <footer className="bg-white border-t py-6">
-        <div className="max-w-7xl mx-auto px-4 text-center text-gray-500 text-sm">
-          &copy; {new Date().getFullYear()} AttendX Institutional System. Powered by AI.
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <p className="text-gray-500 text-sm">
+            &copy; {new Date().getFullYear()} AttendX Institutional System.
+          </p>
+          <p className="text-blue-600 text-xs font-bold mt-1 uppercase tracking-widest">
+            Engineered by SIENA Group
+          </p>
         </div>
       </footer>
     </div>
