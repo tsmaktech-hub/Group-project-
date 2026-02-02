@@ -13,7 +13,7 @@ function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: num
   const deltaLambda = (lon2 - lon1) * Math.PI / 180;
 
   const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-            Math.cos(phi1) * Math.cos(phi2) *
+            Math.cos(phi1) * Math.cos(phi2) +
             Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
@@ -56,6 +56,18 @@ export const StudentPortal: React.FC = () => {
       return;
     }
 
+    // DEVICE LOCK CHECK
+    // Check if this specific device/browser has already logged for this session
+    const deviceLockKey = `attendx_lock_${sessionId}`;
+    const lockedMatric = localStorage.getItem(deviceLockKey);
+    
+    if (lockedMatric && lockedMatric.toUpperCase() !== matricNo.toUpperCase()) {
+      setStatus('error');
+      setMessage(`Security Alert: This device has already been used to log attendance for ${lockedMatric}. Only one student is permitted per device.`);
+      setLoading(false);
+      return;
+    }
+
     if (sessionKey.toUpperCase() !== activeSession.sessionKey) {
       setStatus('error');
       setMessage('Incorrect Session Key. Please ask your lecturer.');
@@ -70,7 +82,6 @@ export const StudentPortal: React.FC = () => {
       return;
     }
 
-    // Attempt to get location with more generous timeout and fallback settings
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const distance = getDistanceInMeters(
@@ -80,7 +91,6 @@ export const StudentPortal: React.FC = () => {
           activeSession.location.lng
         );
         
-        // Use session radius + 50m tolerance for indoor GPS jitter
         const allowedRadius = activeSession.radius + 50;
         
         if (distance > allowedRadius) {
@@ -114,10 +124,14 @@ export const StudentPortal: React.FC = () => {
             }
           };
 
+          // Commit record
           localStorage.setItem('attendx_records', JSON.stringify([...records, newRecord]));
           
+          // SET DEVICE LOCK
+          localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
+          
           setStatus('success');
-          setMessage(`Attendance successfully logged for ${name}!`);
+          setMessage(`Attendance successfully logged for ${name}! Device is now locked to this Matric Number for this session.`);
           setLoading(false);
           setName('');
           setMatricNo('');
@@ -127,8 +141,8 @@ export const StudentPortal: React.FC = () => {
       },
       (err) => {
         let errorMsg = 'Location access denied. Attendance cannot be verified.';
-        if (err.code === err.TIMEOUT) errorMsg = 'Location request timed out. Please ensure GPS is ON and you are in an open space or near a window.';
-        if (err.code === err.POSITION_UNAVAILABLE) errorMsg = 'Location information is unavailable at the moment.';
+        if (err.code === err.TIMEOUT) errorMsg = 'Location request timed out. Please ensure GPS is ON and you are in an open space.';
+        if (err.code === err.POSITION_UNAVAILABLE) errorMsg = 'Location information is unavailable.';
         
         setStatus('error');
         setMessage(errorMsg);
@@ -136,8 +150,8 @@ export const StudentPortal: React.FC = () => {
       },
       { 
         enableHighAccuracy: true,
-        timeout: 20000, // Increased to 20 seconds for better reliability in tough signal areas
-        maximumAge: 5000 // Allow using a location fixed within the last 5 seconds
+        timeout: 20000,
+        maximumAge: 5000 
       }
     );
   };
@@ -148,7 +162,7 @@ export const StudentPortal: React.FC = () => {
         <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm">
           <i className="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
           <h2 className="text-xl font-bold">Invalid Session</h2>
-          <p className="text-gray-500 text-sm">The attendance link you followed is invalid or has expired. Please check with your lecturer.</p>
+          <p className="text-gray-500 text-sm">The attendance link you followed is invalid or has expired.</p>
           <button 
             onClick={() => window.location.reload()}
             className="mt-6 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold"
@@ -162,13 +176,16 @@ export const StudentPortal: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 md:p-8">
-      <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100">
         <div className="bg-blue-600 p-8 text-white text-center">
           <div className="bg-blue-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
             <i className="fas fa-university text-3xl"></i>
           </div>
-          <h1 className="text-2xl font-black tracking-tight">Student Attendance Portal</h1>
-          <p className="text-blue-100 mt-2 text-sm">Logging for session at: {new Date(activeSession.startTime).toLocaleTimeString()}</p>
+          <h1 className="text-2xl font-black tracking-tight">Attendance Verification</h1>
+          <div className="mt-2 inline-flex items-center space-x-2 bg-blue-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest text-blue-100">
+             <i className="fas fa-lock"></i>
+             <span>Secure Device Lock Enabled</span>
+          </div>
         </div>
 
         <div className="p-8 md:p-10">
@@ -179,12 +196,9 @@ export const StudentPortal: React.FC = () => {
               </div>
               <h2 className="text-2xl font-bold text-gray-900">Verified!</h2>
               <p className="text-gray-600 px-4">{message}</p>
-              <button 
-                onClick={() => setStatus('idle')}
-                className="mt-6 text-blue-600 font-bold hover:underline"
-              >
-                Log another student
-              </button>
+              <div className="bg-gray-50 p-4 rounded-xl text-xs text-gray-500 italic mt-4">
+                Note: This device cannot be used by another student for this specific lecture session.
+              </div>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -242,10 +256,10 @@ export const StudentPortal: React.FC = () => {
               </div>
 
               {status === 'error' && (
-                <div className="bg-red-50 text-red-600 p-4 rounded-xl flex flex-col space-y-2 text-sm animate-in slide-in-from-bottom-2">
+                <div className="bg-red-50 text-red-600 p-4 rounded-xl flex flex-col space-y-2 text-sm animate-in slide-in-from-bottom-2 border border-red-100">
                   <div className="flex items-center space-x-2">
                     <i className="fas fa-exclamation-circle flex-shrink-0"></i>
-                    <span>{message}</span>
+                    <span className="font-medium">{message}</span>
                   </div>
                   {message.includes('timeout') && (
                     <button 
@@ -279,7 +293,9 @@ export const StudentPortal: React.FC = () => {
       </div>
 
       <div className="mt-8 text-center space-y-2">
-        <p className="text-gray-400 text-xs font-medium">Geo-fencing active with indoor tolerance. Must reach 75% for exam eligibility.</p>
+        <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">
+           Security Protocol: One Device per Session
+        </p>
         <p className="text-blue-600 text-[10px] font-black uppercase tracking-[0.2em] opacity-70">Engineered by SIENA Group</p>
       </div>
     </div>
