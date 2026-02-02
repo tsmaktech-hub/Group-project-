@@ -4,6 +4,22 @@ import { useParams } from 'react-router-dom';
 import { DEPARTMENTS } from '../constants';
 import { AttendanceSession, AttendanceRecord } from '../types';
 
+// Precise distance calculation using Haversine formula
+function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // Earth's radius in meters
+  const phi1 = lat1 * Math.PI / 180;
+  const phi2 = lat2 * Math.PI / 180;
+  const deltaPhi = (lat2 - lat1) * Math.PI / 180;
+  const deltaLambda = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+            Math.cos(phi1) * Math.cos(phi2) *
+            Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+}
+
 export const StudentPortal: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [name, setName] = useState('');
@@ -52,24 +68,27 @@ export const StudentPortal: React.FC = () => {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        // Calculate distance (very rough simplification for demo)
-        const latDiff = Math.abs(position.coords.latitude - activeSession.location.lat);
-        const lngDiff = Math.abs(position.coords.longitude - activeSession.location.lng);
+        const distance = getDistanceInMeters(
+          position.coords.latitude,
+          position.coords.longitude,
+          activeSession.location.lat,
+          activeSession.location.lng
+        );
         
-        // Approx 100m threshold
-        if (latDiff > 0.001 || lngDiff > 0.001) {
+        // Use session radius + 50m tolerance for indoor GPS jitter
+        const allowedRadius = activeSession.radius + 50;
+        
+        if (distance > allowedRadius) {
            setStatus('error');
-           setMessage('Outside lecture range. Attendance denied.');
+           setMessage(`Outside lecture range. You are approx. ${Math.round(distance)}m away (Range: ${allowedRadius}m). Please move closer to the lecturer.`);
            setLoading(false);
            return;
         }
 
         setTimeout(() => {
-          // Save Record
           const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
           
-          // Check if student already submitted for this session
-          const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo === matricNo);
+          const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo.toUpperCase() === matricNo.toUpperCase());
           if (alreadySubmitted) {
             setStatus('error');
             setMessage('You have already logged attendance for this session.');
@@ -99,24 +118,38 @@ export const StudentPortal: React.FC = () => {
           setMatricNo('');
           setDepartment('');
           setSessionKey('');
-        }, 1000);
+        }, 800);
       },
       (err) => {
+        let errorMsg = 'Location access denied. Attendance cannot be verified.';
+        if (err.code === err.TIMEOUT) errorMsg = 'Location request timed out. Please try again in an open area.';
+        if (err.code === err.POSITION_UNAVAILABLE) errorMsg = 'Location information is unavailable.';
+        
         setStatus('error');
-        setMessage('Location access denied. Attendance cannot be verified.');
+        setMessage(errorMsg);
         setLoading(false);
       },
-      { enableHighAccuracy: true }
+      { 
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
     );
   };
 
   if (!activeSession) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-lg text-center">
+        <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm">
           <i className="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
           <h2 className="text-xl font-bold">Invalid Session</h2>
-          <p className="text-gray-500">The attendance link you followed is invalid or has expired.</p>
+          <p className="text-gray-500 text-sm">The attendance link you followed is invalid or has expired. Please check with your lecturer.</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-6 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -145,7 +178,7 @@ export const StudentPortal: React.FC = () => {
                 onClick={() => setStatus('idle')}
                 className="mt-6 text-blue-600 font-bold hover:underline"
               >
-                Done
+                Log another student
               </button>
             </div>
           ) : (
@@ -198,14 +231,14 @@ export const StudentPortal: React.FC = () => {
                   maxLength={6}
                   value={sessionKey}
                   onChange={(e) => setSessionKey(e.target.value.toUpperCase())}
-                  className="w-full text-center text-3xl font-black tracking-[0.5em] py-4 bg-white border border-blue-200 rounded-xl focus:ring-4 focus:ring-blue-100 outline-none transition-all text-blue-700 uppercase"
+                  className="w-full text-center text-3xl font-black tracking-[0.5em] py-4 bg-white border border-blue-200 rounded-xl focus:ring-4 focus:ring-blue-100 outline-none transition-all text-blue-700 uppercase placeholder:text-blue-100"
                   placeholder="------"
                 />
               </div>
 
               {status === 'error' && (
                 <div className="bg-red-50 text-red-600 p-4 rounded-xl flex items-center space-x-2 text-sm animate-in slide-in-from-bottom-2">
-                  <i className="fas fa-exclamation-circle"></i>
+                  <i className="fas fa-exclamation-circle flex-shrink-0"></i>
                   <span>{message}</span>
                 </div>
               )}
@@ -230,7 +263,7 @@ export const StudentPortal: React.FC = () => {
       </div>
 
       <div className="mt-8 text-center text-gray-400 text-xs font-medium space-y-1">
-        <p>Geo-fencing active. Must reach 75% for exam eligibility.</p>
+        <p>Geo-fencing active with indoor tolerance. Must reach 75% for exam eligibility.</p>
       </div>
     </div>
   );
