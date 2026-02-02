@@ -18,9 +18,8 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [aiInsights, setAiInsights] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
-  const navigate = useNavigate();
 
-  // Load records for this session in real-time
+  // Load records for this session and listen for real-time updates
   useEffect(() => {
     const fetchRecords = () => {
       const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
@@ -30,7 +29,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
 
     fetchRecords();
 
-    // Listen for storage events (student submissions from other windows)
+    // Listen for storage changes from other tabs/users
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'attendx_records') {
         fetchRecords();
@@ -38,8 +37,8 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
     };
     window.addEventListener('storage', handleStorageChange);
     
-    // Also poll every few seconds just in case some browsers don't trigger storage event on same page
-    const interval = setInterval(fetchRecords, 3000);
+    // Polling as a fallback for high-reliability real-time feel
+    const interval = setInterval(fetchRecords, 2000);
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
@@ -48,40 +47,46 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
   }, [sessionId]);
 
   const runAiAnalysis = async () => {
+    if (records.length === 0) return;
     setAnalyzing(true);
-    // Real stats based on current session and some history
-    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const courseSessions = allSessions.filter(s => s.courseId === activeSession?.courseId);
     
-    const mockStats: StudentStats[] = records.map(r => ({
-      matricNo: r.matricNo,
-      name: r.studentName,
-      sessionsAttended: Math.floor(Math.random() * courseSessions.length) + 1,
-      totalSessions: courseSessions.length,
-      percentage: 0,
-      eligible: false
-    })).map(s => {
-      const pct = (s.sessionsAttended / s.totalSessions) * 100;
-      return { ...s, percentage: pct, eligible: pct >= 75 };
+    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+    const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+    
+    // Determine the course context from the current session
+    const currentSessionData = activeSession || allSessions.find(s => s.id === sessionId);
+    if (!currentSessionData) {
+      setAnalyzing(false);
+      return;
+    }
+
+    const courseSessions = allSessions.filter(s => s.courseId === currentSessionData.courseId);
+    
+    // Calculate ACTUAL stats for students in this session based on historical data
+    const realStats: StudentStats[] = records.map(r => {
+      const studentHistoryForCourse = allRecords.filter(rec => 
+        rec.matricNo === r.matricNo && 
+        courseSessions.some(sess => sess.id === rec.sessionId)
+      );
+      
+      const count = studentHistoryForCourse.length;
+      const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
+      
+      return {
+        matricNo: r.matricNo,
+        name: r.studentName,
+        sessionsAttended: count,
+        totalSessions: courseSessions.length,
+        percentage: pct,
+        eligible: pct >= 75
+      };
     });
 
-    const insight = await analyzeAttendance(mockStats);
+    const insight = await analyzeAttendance(realStats);
     setAiInsights(insight);
     setAnalyzing(false);
   };
 
-  if (!activeSession && !sessionId) {
-    return (
-      <Layout onLogout={onLogout} showLogout>
-        <div className="text-center py-20">
-          <h2 className="text-2xl font-bold text-gray-800">No active session found.</h2>
-          <Link to="/dashboard" className="text-blue-600 font-semibold hover:underline mt-4 inline-block">Return to Dashboard</Link>
-        </div>
-      </Layout>
-    );
-  }
-
-  // If session is ended but we are viewing it
   const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
   const sessionData = activeSession || sessions.find(s => s.id === sessionId);
 
@@ -135,7 +140,6 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
                       alert('Link copied to clipboard!');
                     }}
                     className="bg-gray-800 text-white p-2 rounded-lg hover:bg-black transition-colors"
-                    title="Copy link"
                   >
                     <i className="fas fa-copy"></i>
                   </button>
@@ -180,7 +184,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
                         <td className="px-6 py-4 text-sm font-semibold text-gray-900">{record.matricNo}</td>
                         <td className="px-6 py-4 text-sm text-gray-700">{record.studentName}</td>
                         <td className="px-6 py-4 text-sm text-gray-500">{new Date(record.timestamp).toLocaleTimeString()}</td>
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-4 text-right">
                           <span className="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase">Verified</span>
                         </td>
                       </tr>
@@ -198,7 +202,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
                 <i className="fas fa-microchip text-blue-500"></i>
               </div>
               <p className="text-sm text-gray-500 mb-6">
-                Analyze student achievement relative to the 75% threshold.
+                Analyze student achievement relative to the 75% threshold based on historical records.
               </p>
               {aiInsights ? (
                 <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-800 mb-4 animate-in fade-in zoom-in">
