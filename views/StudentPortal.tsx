@@ -4,6 +4,8 @@ import { useParams } from 'react-router-dom';
 import { DEPARTMENTS } from '../constants';
 import { AttendanceSession, AttendanceRecord } from '../types';
 
+const LINK_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+
 function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371e3;
   const phi1 = lat1 * Math.PI / 180;
@@ -25,7 +27,7 @@ export const StudentPortal: React.FC = () => {
   const [department, setDepartment] = useState('');
   const [sessionKey, setSessionKey] = useState('');
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'expired'>('idle');
   const [message, setMessage] = useState('');
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
   
@@ -36,9 +38,17 @@ export const StudentPortal: React.FC = () => {
   useEffect(() => {
     const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
     const found = sessions.find(s => s.id === sessionId);
+    
     if (found) {
-      setActiveSession(found);
-      startCamera();
+      // Check for 30-minute expiration
+      const timeElapsed = Date.now() - found.startTime;
+      if (timeElapsed > LINK_EXPIRY_MS) {
+        setStatus('expired');
+        setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
+      } else {
+        setActiveSession(found);
+        startCamera();
+      }
     }
   }, [sessionId]);
 
@@ -80,6 +90,15 @@ export const StudentPortal: React.FC = () => {
     if (!activeSession || !activeSession.active) {
       setStatus('error');
       setMessage('This session is no longer active.');
+      setLoading(false);
+      return;
+    }
+
+    // Double check expiration on submit
+    const timeElapsed = Date.now() - activeSession.startTime;
+    if (timeElapsed > LINK_EXPIRY_MS) {
+      setStatus('expired');
+      setMessage('This link has just expired. Attendance can no longer be logged.');
       setLoading(false);
       return;
     }
@@ -184,6 +203,23 @@ export const StudentPortal: React.FC = () => {
     setMessage(`Verified! Attendance logged for ${name}.`);
     setLoading(false);
   };
+
+  if (status === 'expired') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl text-center max-w-sm border border-red-50">
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+             <i className="fas fa-clock text-2xl"></i>
+          </div>
+          <h2 className="text-xl font-black text-gray-900 uppercase">Link Expired</h2>
+          <p className="text-gray-500 text-sm mt-2">{message}</p>
+          <div className="mt-6 pt-6 border-t border-gray-100">
+             <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Institutional Security Policy</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!activeSession) {
     return (

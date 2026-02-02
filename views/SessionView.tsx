@@ -6,6 +6,8 @@ import { User, AttendanceSession, AttendanceRecord, StudentStats } from '../type
 import { COURSES, DEPARTMENTS } from '../constants';
 import { analyzeAttendance } from '../services/geminiService';
 
+const LINK_EXPIRY_MS = 30 * 60 * 1000;
+
 interface SessionViewProps {
   user: User | null;
   activeSession: AttendanceSession | null;
@@ -19,6 +21,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
   const [aiInsights, setAiInsights] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedFace, setSelectedFace] = useState<string | null>(null);
+  const [timeLeft, setTimeLeft] = useState<string>('');
 
   useEffect(() => {
     const fetchRecords = () => {
@@ -27,8 +30,27 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
       setRecords(filtered.sort((a, b) => b.timestamp - a.timestamp));
     };
 
+    const updateTimer = () => {
+      const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+      const sess = sessions.find(s => s.id === sessionId);
+      if (sess && sess.active) {
+        const diff = LINK_EXPIRY_MS - (Date.now() - sess.startTime);
+        if (diff <= 0) {
+          setTimeLeft('EXPIRED');
+        } else {
+          const mins = Math.floor(diff / 60000);
+          const secs = Math.floor((diff % 60000) / 1000);
+          setTimeLeft(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
+        }
+      }
+    };
+
     fetchRecords();
-    const interval = setInterval(fetchRecords, 3000);
+    updateTimer();
+    const interval = setInterval(() => {
+      fetchRecords();
+      updateTimer();
+    }, 1000);
     return () => clearInterval(interval);
   }, [sessionId]);
 
@@ -90,7 +112,6 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
 
   return (
     <Layout title="Live Verification" onLogout={onLogout} showLogout>
-      {/* Face Image Modal */}
       {selectedFace && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 animate-in fade-in" onClick={() => setSelectedFace(null)}>
            <div className="bg-white rounded-3xl p-2 max-w-sm w-full relative animate-in zoom-in duration-200">
@@ -113,6 +134,14 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
                 {sessionData.active ? 'Active Verification' : 'Past Report'}
               </span>
               <h1 className="text-2xl font-bold text-gray-900">{course?.code}: {course?.name}</h1>
+              {sessionData.active && (
+                <div className="flex items-center space-x-2 mt-2">
+                  <i className={`fas fa-hourglass-half text-xs ${timeLeft === 'EXPIRED' ? 'text-red-500' : 'text-blue-500'}`}></i>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${timeLeft === 'EXPIRED' ? 'text-red-600' : 'text-blue-600'}`}>
+                    Link Expires in: {timeLeft}
+                  </span>
+                </div>
+              )}
             </div>
             {sessionData.active && (
               <div className="bg-blue-600 text-white px-6 py-4 rounded-2xl text-center shadow-lg border-b-4 border-blue-800">
