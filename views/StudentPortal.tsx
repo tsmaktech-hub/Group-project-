@@ -41,6 +41,10 @@ export const StudentPortal: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    performAttendanceCheck();
+  };
+
+  const performAttendanceCheck = () => {
     setLoading(true);
     setStatus('idle');
     setMessage('');
@@ -66,6 +70,7 @@ export const StudentPortal: React.FC = () => {
       return;
     }
 
+    // Attempt to get location with more generous timeout and fallback settings
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const distance = getDistanceInMeters(
@@ -122,8 +127,8 @@ export const StudentPortal: React.FC = () => {
       },
       (err) => {
         let errorMsg = 'Location access denied. Attendance cannot be verified.';
-        if (err.code === err.TIMEOUT) errorMsg = 'Location request timed out. Please try again in an open area.';
-        if (err.code === err.POSITION_UNAVAILABLE) errorMsg = 'Location information is unavailable.';
+        if (err.code === err.TIMEOUT) errorMsg = 'Location request timed out. Please ensure GPS is ON and you are in an open space or near a window.';
+        if (err.code === err.POSITION_UNAVAILABLE) errorMsg = 'Location information is unavailable at the moment.';
         
         setStatus('error');
         setMessage(errorMsg);
@@ -131,8 +136,8 @@ export const StudentPortal: React.FC = () => {
       },
       { 
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
+        timeout: 20000, // Increased to 20 seconds for better reliability in tough signal areas
+        maximumAge: 5000 // Allow using a location fixed within the last 5 seconds
       }
     );
   };
@@ -237,9 +242,20 @@ export const StudentPortal: React.FC = () => {
               </div>
 
               {status === 'error' && (
-                <div className="bg-red-50 text-red-600 p-4 rounded-xl flex items-center space-x-2 text-sm animate-in slide-in-from-bottom-2">
-                  <i className="fas fa-exclamation-circle flex-shrink-0"></i>
-                  <span>{message}</span>
+                <div className="bg-red-50 text-red-600 p-4 rounded-xl flex flex-col space-y-2 text-sm animate-in slide-in-from-bottom-2">
+                  <div className="flex items-center space-x-2">
+                    <i className="fas fa-exclamation-circle flex-shrink-0"></i>
+                    <span>{message}</span>
+                  </div>
+                  {message.includes('timeout') && (
+                    <button 
+                      type="button"
+                      onClick={performAttendanceCheck}
+                      className="text-red-800 font-bold hover:underline text-left text-xs uppercase"
+                    >
+                      <i className="fas fa-redo mr-1"></i> Try location fix again
+                    </button>
+                  )}
                 </div>
               )}
 
