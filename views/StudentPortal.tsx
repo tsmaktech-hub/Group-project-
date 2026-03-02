@@ -27,6 +27,7 @@ export const StudentPortal: React.FC = () => {
   const [department, setDepartment] = useState('');
   const [sessionKey, setSessionKey] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'expired'>('idle');
   const [message, setMessage] = useState('');
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
@@ -37,8 +38,12 @@ export const StudentPortal: React.FC = () => {
 
   useEffect(() => {
     const fetchSession = async () => {
-      if (!sessionId) return;
+      if (!sessionId) {
+        setSessionLoading(false);
+        return;
+      }
       
+      setSessionLoading(true);
       const { data: found, error } = await supabase
         .from('attendance_sessions')
         .select('*')
@@ -49,6 +54,7 @@ export const StudentPortal: React.FC = () => {
         console.error("Supabase error:", error);
         setStatus('error');
         setMessage(error.message || 'Failed to connect to database.');
+        setSessionLoading(false);
         return;
       }
 
@@ -66,6 +72,7 @@ export const StudentPortal: React.FC = () => {
         setStatus('error');
         setMessage('Session not found.');
       }
+      setSessionLoading(false);
     };
 
     fetchSession();
@@ -237,6 +244,15 @@ export const StudentPortal: React.FC = () => {
       setLoading(false);
     }
   };
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+        <p className="mt-4 text-gray-500 font-bold uppercase text-[10px] tracking-widest">Verifying Session...</p>
+      </div>
+    );
+  }
 
   if (status === 'expired') {
     return (
