@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { DEPARTMENTS } from '../constants';
 import { AttendanceSession, AttendanceRecord } from '../types';
+import { supabase } from '../services/supabase';
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -36,20 +36,32 @@ export const StudentPortal: React.FC = () => {
   const [cameraActive, setCameraActive] = useState(false);
 
   useEffect(() => {
-    const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const found = sessions.find(s => s.id === sessionId);
-    
-    if (found) {
-      // Check for 30-minute expiration
-      const timeElapsed = Date.now() - found.startTime;
-      if (timeElapsed > LINK_EXPIRY_MS) {
-        setStatus('expired');
-        setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
+    const fetchSession = async () => {
+      if (!sessionId) return;
+      
+      const { data: found, error } = await supabase
+        .from('attendance_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+      
+      if (found) {
+        // Check for 30-minute expiration
+        const timeElapsed = Date.now() - found.startTime;
+        if (timeElapsed > LINK_EXPIRY_MS) {
+          setStatus('expired');
+          setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
+        } else {
+          setActiveSession(found);
+          startCamera();
+        }
       } else {
-        setActiveSession(found);
-        startCamera();
+        setStatus('error');
+        setMessage('Session not found.');
       }
-    }
+    };
+
+    fetchSession();
   }, [sessionId]);
 
   const startCamera = async () => {
@@ -172,36 +184,51 @@ export const StudentPortal: React.FC = () => {
        return;
     }
 
-    const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-    const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo.toUpperCase() === matricNo.toUpperCase());
-    
-    if (alreadySubmitted) {
-      setStatus('error');
-      setMessage('Attendance already recorded.');
-      setLoading(false);
-      return;
-    }
+    try {
+      const { data: existingRecords, error: checkError } = await supabase
+        .from('attendance_records')
+        .select('id')
+        .eq('sessionId', sessionId)
+        .eq('matricNo', matricNo.toUpperCase());
 
-    const newRecord: AttendanceRecord = {
-      id: Math.random().toString(36).substr(2, 9),
-      sessionId: sessionId!,
-      studentName: name,
-      matricNo: matricNo.toUpperCase(),
-      department: department,
-      timestamp: Date.now(),
-      faceImage: faceImage,
-      location: {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude
+      if (checkError) throw checkError;
+      
+      if (existingRecords && existingRecords.length > 0) {
+        setStatus('error');
+        setMessage('Attendance already recorded.');
+        setLoading(false);
+        return;
       }
-    };
 
-    localStorage.setItem('attendx_records', JSON.stringify([...records, newRecord]));
-    localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
-    
-    setStatus('success');
-    setMessage(`Verified! Attendance logged for ${name}.`);
-    setLoading(false);
+      const { error: insertError } = await supabase
+        .from('attendance_records')
+        .insert([
+          {
+            sessionId: sessionId!,
+            studentName: name,
+            matricNo: matricNo.toUpperCase(),
+            department: department,
+            timestamp: Date.now(),
+            faceImage: faceImage,
+            location: {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            }
+          }
+        ]);
+
+      if (insertError) throw insertError;
+
+      localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
+      
+      setStatus('success');
+      setMessage(`Verified! Attendance logged for ${name}.`);
+    } catch (err: any) {
+      setStatus('error');
+      setMessage(err.message || 'Failed to log attendance.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (status === 'expired') {

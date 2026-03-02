@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { AttendanceSession, AttendanceRecord, StudentStats } from '../types';
 import { COURSES } from '../constants';
+import { supabase } from '../services/supabase';
 
 interface AuditViewProps {
   onLogout: () => void;
@@ -13,41 +14,76 @@ export const AuditView: React.FC<AuditViewProps> = ({ onLogout }) => {
   const { courseId } = useParams<{ courseId: string }>();
   const [stats, setStats] = useState<StudentStats[]>([]);
   const [totalSessions, setTotalSessions] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const course = COURSES.find(c => c.id === courseId);
 
   useEffect(() => {
-    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const courseSessions = allSessions.filter(s => s.courseId === courseId);
-    setTotalSessions(courseSessions.length);
+    const fetchAuditData = async () => {
+      setLoading(true);
+      try {
+        const { data: courseSessions, error: sessionsError } = await supabase
+          .from('attendance_sessions')
+          .select('*')
+          .eq('courseId', courseId);
 
-    const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-    const courseRecords = allRecords.filter(r => courseSessions.some(s => s.id === r.sessionId));
+        if (sessionsError) throw sessionsError;
 
-    // Group by matric no
-    const studentMap: Record<string, { name: string; count: number }> = {};
-    courseRecords.forEach(r => {
-      if (!studentMap[r.matricNo]) {
-        studentMap[r.matricNo] = { name: r.studentName, count: 0 };
+        if (courseSessions) {
+          setTotalSessions(courseSessions.length);
+
+          const { data: courseRecords, error: recordsError } = await supabase
+            .from('attendance_records')
+            .select('*')
+            .in('sessionId', courseSessions.map(s => s.id));
+
+          if (recordsError) throw recordsError;
+
+          if (courseRecords) {
+            // Group by matric no
+            const studentMap: Record<string, { name: string; count: number }> = {};
+            courseRecords.forEach(r => {
+              if (!studentMap[r.matricNo]) {
+                studentMap[r.matricNo] = { name: r.studentName, count: 0 };
+              }
+              studentMap[r.matricNo].count += 1;
+            });
+
+            const calculatedStats: StudentStats[] = Object.keys(studentMap).map(matric => {
+              const { name, count } = studentMap[matric];
+              const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
+              return {
+                matricNo: matric,
+                name,
+                sessionsAttended: count,
+                totalSessions: courseSessions.length,
+                percentage: pct,
+                eligible: pct >= 75
+              };
+            });
+
+            setStats(calculatedStats.sort((a, b) => b.percentage - a.percentage));
+          }
+        }
+      } catch (err: any) {
+        console.error('Error fetching audit data:', err.message);
+      } finally {
+        setLoading(false);
       }
-      studentMap[r.matricNo].count += 1;
-    });
+    };
 
-    const calculatedStats: StudentStats[] = Object.keys(studentMap).map(matric => {
-      const { name, count } = studentMap[matric];
-      const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
-      return {
-        matricNo: matric,
-        name,
-        sessionsAttended: count,
-        totalSessions: courseSessions.length,
-        percentage: pct,
-        eligible: pct >= 75
-      };
-    });
-
-    setStats(calculatedStats.sort((a, b) => b.percentage - a.percentage));
+    fetchAuditData();
   }, [courseId]);
+
+  if (loading) {
+    return (
+      <Layout onLogout={onLogout} showLogout>
+        <div className="flex items-center justify-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout title="Exam Eligibility Audit" onLogout={onLogout} showLogout>

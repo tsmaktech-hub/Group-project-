@@ -3,8 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { User, AttendanceSession, AttendanceRecord, StudentStats } from '../types';
-import { COURSES, DEPARTMENTS } from '../constants';
+import { COURSES } from '../constants';
 import { analyzeAttendance } from '../services/geminiService';
+import { supabase } from '../services/supabase';
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000;
 
@@ -18,23 +19,60 @@ interface SessionViewProps {
 export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, onLogout, onEndSession }) => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [sessionData, setSessionData] = useState<AttendanceSession | null>(activeSession);
   const [aiInsights, setAiInsights] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedFace, setSelectedFace] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchRecords = () => {
-      const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-      const filtered = allRecords.filter(r => r.sessionId === sessionId);
-      setRecords(filtered.sort((a, b) => b.timestamp - a.timestamp));
+    const fetchSessionAndRecords = async () => {
+      setLoading(true);
+      const { data: session, error: sessionError } = await supabase
+        .from('attendance_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (session) {
+        setSessionData(session);
+      }
+
+      const { data: initialRecords, error: recordsError } = await supabase
+        .from('attendance_records')
+        .select('*')
+        .eq('sessionId', sessionId)
+        .order('timestamp', { ascending: false });
+
+      if (initialRecords) {
+        setRecords(initialRecords);
+      }
+      setLoading(false);
     };
 
+    fetchSessionAndRecords();
+
+    // Set up real-time subscription for new records
+    const channel = supabase
+      .channel(`session-${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'attendance_records',
+          filter: `sessionId=eq.${sessionId}`
+        },
+        (payload) => {
+          setRecords(prev => [payload.new as AttendanceRecord, ...prev]);
+        }
+      )
+      .subscribe();
+
     const updateTimer = () => {
-      const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-      const sess = sessions.find(s => s.id === sessionId);
-      if (sess && sess.active) {
-        const diff = LINK_EXPIRY_MS - (Date.now() - sess.startTime);
+      if (sessionData && sessionData.active) {
+        const diff = LINK_EXPIRY_MS - (Date.now() - sessionData.startTime);
         if (diff <= 0) {
           setTimeLeft('EXPIRED');
         } else {
@@ -45,56 +83,87 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
       }
     };
 
-    fetchRecords();
     updateTimer();
     const interval = setInterval(() => {
-      fetchRecords();
       updateTimer();
     }, 1000);
-    return () => clearInterval(interval);
-  }, [sessionId]);
 
-  const runAiAnalysis = async () => {
-    if (records.length === 0) return;
-    setAnalyzing(true);
-    
-    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-    
-    const currentSessionData = activeSession || allSessions.find(s => s.id === sessionId);
-    if (!currentSessionData) {
-      setAnalyzing(false);
-      return;
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [sessionId, sessionData?.active, sessionData?.startTime]);
+
+  const handleEndSession = async () => {
+    if (!sessionId) return;
+    try {
+      const { error } = await supabase
+        .from('attendance_sessions')
+        .update({ active: false, endTime: Date.now() })
+        .eq('id', sessionId);
+
+      if (error) throw error;
+      
+      setSessionData(prev => prev ? { ...prev, active: false, endTime: Date.now() } : null);
+      onEndSession(sessionId);
+    } catch (err: any) {
+      alert(err.message || 'Failed to end session');
     }
-
-    const courseSessions = allSessions.filter(s => s.courseId === currentSessionData.courseId);
-    
-    const realStats: StudentStats[] = records.map(r => {
-      const studentHistoryForCourse = allRecords.filter(rec => 
-        rec.matricNo === r.matricNo && 
-        courseSessions.some(sess => sess.id === rec.sessionId)
-      );
-      
-      const count = studentHistoryForCourse.length;
-      const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
-      
-      return {
-        matricNo: r.matricNo,
-        name: r.studentName,
-        sessionsAttended: count,
-        totalSessions: courseSessions.length,
-        percentage: pct,
-        eligible: pct >= 75
-      };
-    });
-
-    const insight = await analyzeAttendance(realStats);
-    setAiInsights(insight);
-    setAnalyzing(false);
   };
 
-  const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-  const sessionData = activeSession || sessions.find(s => s.id === sessionId);
+  const runAiAnalysis = async () => {
+    if (records.length === 0 || !sessionData) return;
+    setAnalyzing(true);
+    
+    try {
+      const { data: allSessions } = await supabase
+        .from('attendance_sessions')
+        .select('*')
+        .eq('courseId', sessionData.courseId);
+
+      const { data: allRecords } = await supabase
+        .from('attendance_records')
+        .select('*')
+        .in('sessionId', (allSessions || []).map(s => s.id));
+
+      if (!allSessions || !allRecords) throw new Error('Failed to fetch data for analysis');
+
+      const realStats: StudentStats[] = records.map(r => {
+        const studentHistoryForCourse = allRecords.filter(rec => 
+          rec.matricNo === r.matricNo
+        );
+        
+        const count = studentHistoryForCourse.length;
+        const pct = allSessions.length > 0 ? (count / allSessions.length) * 100 : 0;
+        
+        return {
+          matricNo: r.matricNo,
+          name: r.studentName,
+          sessionsAttended: count,
+          totalSessions: allSessions.length,
+          percentage: pct,
+          eligible: pct >= 75
+        };
+      });
+
+      const insight = await analyzeAttendance(realStats);
+      setAiInsights(insight);
+    } catch (err: any) {
+      setAiInsights('Analysis failed: ' + err.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Layout onLogout={onLogout} showLogout>
+        <div className="flex items-center justify-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+        </div>
+      </Layout>
+    );
+  }
 
   if (!sessionData) {
     return (
@@ -242,7 +311,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
             {sessionData.active && (
               <div className="bg-red-50 rounded-2xl border border-red-100 p-6">
                 <button 
-                  onClick={() => onEndSession(sessionData.id)}
+                  onClick={handleEndSession}
                   className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center space-x-2 text-xs uppercase shadow-lg shadow-red-200"
                 >
                   <i className="fas fa-power-off"></i>

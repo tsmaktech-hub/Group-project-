@@ -5,6 +5,7 @@ import { Layout } from '../components/Layout';
 import { User, AttendanceSession } from '../types';
 import { DEPARTMENTS, COURSES, LEVELS, GEOCONFIG } from '../constants';
 import { ResetConfirmation } from '../components/ResetConfirmation';
+import { supabase } from '../services/supabase';
 
 interface LecturerDashboardProps {
   user: User | null;
@@ -22,7 +23,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
 
   const filteredCourses = COURSES.filter(c => c.deptId === selectedDept);
 
-  const handleStartSession = () => {
+  const handleStartSession = async () => {
     if (!selectedDept || !selectedLevel || !selectedCourse) {
       setError('Please complete all selections.');
       return;
@@ -38,28 +39,46 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const sessionKey = Math.random().toString(36).substr(2, 6).toUpperCase();
-        const sessionId = Math.random().toString(36).substr(2, 9);
         
-        const newSession: AttendanceSession = {
-          id: sessionId,
-          lecturerId: user?.id || 'anonymous',
-          courseId: selectedCourse,
-          departmentId: selectedDept,
-          level: selectedLevel,
-          sessionKey,
-          startTime: Date.now(),
-          location: {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          },
-          radius: GEOCONFIG.DEFAULT_RADIUS,
-          active: true
-        };
+        try {
+          // Deactivate any existing active sessions for this lecturer
+          await supabase
+            .from('attendance_sessions')
+            .update({ active: false })
+            .eq('lecturerId', user?.id)
+            .eq('active', true);
 
-        onStartSession(newSession);
-        setLoading(false);
+          const { data, error: insertError } = await supabase
+            .from('attendance_sessions')
+            .insert([
+              {
+                lecturerId: user?.id,
+                courseId: selectedCourse,
+                departmentId: selectedDept,
+                level: selectedLevel,
+                sessionKey,
+                startTime: Date.now(),
+                location: {
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude
+                },
+                radius: GEOCONFIG.DEFAULT_RADIUS,
+                active: true
+              }
+            ])
+            .select()
+            .single();
+
+          if (insertError) throw insertError;
+
+          onStartSession(data as AttendanceSession);
+        } catch (err: any) {
+          setError(err.message || 'Failed to start session.');
+        } finally {
+          setLoading(false);
+        }
       },
       (err) => {
         setError('Failed to get your location. Please enable location services.');
@@ -68,17 +87,30 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
     );
   };
 
-  const handleGlobalReset = () => {
-    localStorage.removeItem('attendx_records');
-    localStorage.removeItem('attendx_sessions');
-    // Also clear individual session locks to be thorough
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('attendx_lock_')) {
-        localStorage.removeItem(key);
-      }
-    });
-    setShowResetModal(false);
-    window.location.reload(); // Refresh to clear states
+  const handleGlobalReset = async () => {
+    setLoading(true);
+    try {
+      // In a real app, you might want to delete or archive records
+      // For this demo, we'll just delete records and sessions
+      const { error: recordsError } = await supabase
+        .from('attendance_records')
+        .delete()
+        .neq('id', 'placeholder'); // Supabase delete needs a filter
+
+      const { error: sessionsError } = await supabase
+        .from('attendance_sessions')
+        .delete()
+        .neq('id', 'placeholder');
+
+      if (recordsError || sessionsError) throw new Error('Failed to reset data');
+
+      setShowResetModal(false);
+      window.location.reload();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset data.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
