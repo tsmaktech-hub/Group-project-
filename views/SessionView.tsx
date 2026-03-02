@@ -177,7 +177,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
   }
 
   const course = COURSES.find(c => c.id === sessionData.courseId);
-  const portalUrl = `${window.location.origin}${window.location.pathname}#/portal/${sessionData.id}`;
+  const portalUrl = `${window.location.origin}/#/portal/${sessionData.id}`;
 
   return (
     <Layout title="Live Verification" onLogout={onLogout} showLogout>

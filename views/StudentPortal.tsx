@@ -45,6 +45,13 @@ export const StudentPortal: React.FC = () => {
         .eq('id', sessionId)
         .single();
       
+      if (error) {
+        console.error("Supabase error:", error);
+        setStatus('error');
+        setMessage(error.message || 'Failed to connect to database.');
+        return;
+      }
+
       if (found) {
         // Check for 30-minute expiration
         const timeElapsed = Date.now() - found.startTime;
@@ -254,6 +261,7 @@ export const StudentPortal: React.FC = () => {
         <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm">
           <i className="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
           <h2 className="text-xl font-bold">Session Unavailable</h2>
+          <p className="text-gray-500 text-sm mt-2">{message || 'The session link might be incorrect or has been removed.'}</p>
           <button onClick={() => window.location.reload()} className="mt-6 text-blue-600 font-bold uppercase text-xs tracking-widest">Retry Connection</button>
         </div>
       </div>
