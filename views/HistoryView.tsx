@@ -2,64 +2,20 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
-import { AttendanceSession } from '../types';
-import { COURSES } from '../constants';
-import { supabase } from '../services/supabase';
+import { AttendanceSession, AttendanceRecord } from '../types';
+import { COURSES, DEPARTMENTS } from '../constants';
 
 interface HistoryViewProps {
   onLogout: () => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({ onLogout }) => {
-  const [sessions, setSessions] = useState<(AttendanceSession & { attendanceCount: number })[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
 
   useEffect(() => {
-    const fetchHistory = async () => {
-      setLoading(true);
-      try {
-        const { data: sessionsData, error: sessionsError } = await supabase
-          .from('attendance_sessions')
-          .select('*')
-          .order('startTime', { ascending: false });
-
-        if (sessionsError) throw sessionsError;
-
-        if (sessionsData) {
-          const sessionsWithCounts = await Promise.all(
-            sessionsData.map(async (session) => {
-              const { count, error: countError } = await supabase
-                .from('attendance_records')
-                .select('*', { count: 'exact', head: true })
-                .eq('sessionId', session.id);
-              
-              return {
-                ...session,
-                attendanceCount: count || 0
-              };
-            })
-          );
-          setSessions(sessionsWithCounts);
-        }
-      } catch (err: any) {
-        console.error('Error fetching history:', err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchHistory();
+    const savedSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+    setSessions(savedSessions.sort((a, b) => b.startTime - a.startTime));
   }, []);
-
-  if (loading) {
-    return (
-      <Layout onLogout={onLogout} showLogout>
-        <div className="flex items-center justify-center py-20">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
-        </div>
-      </Layout>
-    );
-  }
 
   return (
     <Layout title="Session History" onLogout={onLogout} showLogout>
@@ -82,6 +38,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onLogout }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {sessions.map(session => {
               const course = COURSES.find(c => c.id === session.courseId);
+              const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+              const attendanceCount = records.filter(r => r.sessionId === session.id).length;
 
               return (
                 <div key={session.id} className="bg-white rounded-2xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow flex flex-col">
@@ -103,7 +61,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onLogout }) => {
                   <div className="p-5 flex-1 bg-gray-50/50 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Attendance</p>
-                      <p className="text-2xl font-black text-gray-800">{session.attendanceCount}</p>
+                      <p className="text-2xl font-black text-gray-800">{attendanceCount}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Level</p>

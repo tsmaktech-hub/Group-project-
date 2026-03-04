@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import { DEPARTMENTS } from '../constants';
 import { AttendanceSession, AttendanceRecord } from '../types';
-import { supabase } from '../services/supabase';
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -27,7 +27,6 @@ export const StudentPortal: React.FC = () => {
   const [department, setDepartment] = useState('');
   const [sessionKey, setSessionKey] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionLoading, setSessionLoading] = useState(true);
   const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'expired'>('idle');
   const [message, setMessage] = useState('');
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
@@ -37,73 +36,20 @@ export const StudentPortal: React.FC = () => {
   const [cameraActive, setCameraActive] = useState(false);
 
   useEffect(() => {
-    const fetchSession = async () => {
-      // Check if Supabase is configured
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
-      console.log("StudentPortal: Initializing with sessionId:", sessionId);
-      console.log("StudentPortal: Supabase URL configured:", !!supabaseUrl);
-      
-      if (!supabaseUrl || !supabaseKey || supabaseUrl === 'your_supabase_project_url') {
-        setStatus('error');
-        setMessage('Database connection not configured. Please set your Supabase environment variables.');
-        setSessionLoading(false);
-        return;
+    const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+    const found = sessions.find(s => s.id === sessionId);
+    
+    if (found) {
+      // Check for 30-minute expiration
+      const timeElapsed = Date.now() - found.startTime;
+      if (timeElapsed > LINK_EXPIRY_MS) {
+        setStatus('expired');
+        setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
+      } else {
+        setActiveSession(found);
+        startCamera();
       }
-
-      if (!sessionId) {
-        setSessionLoading(false);
-        setMessage('No session ID found in the URL.');
-        return;
-      }
-      
-      setSessionLoading(true);
-      try {
-        const { data: found, error } = await supabase
-          .from('attendance_sessions')
-          .select('*')
-          .eq('id', sessionId)
-          .single();
-        
-        if (error) {
-          console.error("Supabase error:", error);
-          setStatus('error');
-          if (error.code === 'PGRST116') {
-            setMessage('Session not found. The link might be incorrect or the session has been deleted.');
-          } else if (error.message.includes('JWT')) {
-            setMessage('Authentication error. Please check your Supabase Anon Key.');
-          } else {
-            setMessage(`Connection Error: ${error.message}`);
-          }
-          setSessionLoading(false);
-          return;
-        }
-
-        if (found) {
-          // Check for 30-minute expiration
-          const timeElapsed = Date.now() - found.startTime;
-          if (timeElapsed > LINK_EXPIRY_MS) {
-            setStatus('expired');
-            setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
-          } else {
-            setActiveSession(found);
-            startCamera();
-          }
-        } else {
-          setStatus('error');
-          setMessage('Session not found in database.');
-        }
-      } catch (err: any) {
-        console.error("Unexpected error:", err);
-        setStatus('error');
-        setMessage(`Unexpected error: ${err.message}`);
-      } finally {
-        setSessionLoading(false);
-      }
-    };
-
-    fetchSession();
+    }
   }, [sessionId]);
 
   const startCamera = async () => {
@@ -226,61 +172,37 @@ export const StudentPortal: React.FC = () => {
        return;
     }
 
-    try {
-      const { data: existingRecords, error: checkError } = await supabase
-        .from('attendance_records')
-        .select('id')
-        .eq('sessionId', sessionId)
-        .eq('matricNo', matricNo.toUpperCase());
-
-      if (checkError) throw checkError;
-      
-      if (existingRecords && existingRecords.length > 0) {
-        setStatus('error');
-        setMessage('Attendance already recorded.');
-        setLoading(false);
-        return;
-      }
-
-      const { error: insertError } = await supabase
-        .from('attendance_records')
-        .insert([
-          {
-            sessionId: sessionId!,
-            studentName: name,
-            matricNo: matricNo.toUpperCase(),
-            department: department,
-            timestamp: Date.now(),
-            faceImage: faceImage,
-            location: {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude
-            }
-          }
-        ]);
-
-      if (insertError) throw insertError;
-
-      localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
-      
-      setStatus('success');
-      setMessage(`Verified! Attendance logged for ${name}.`);
-    } catch (err: any) {
+    const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+    const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo.toUpperCase() === matricNo.toUpperCase());
+    
+    if (alreadySubmitted) {
       setStatus('error');
-      setMessage(err.message || 'Failed to log attendance.');
-    } finally {
+      setMessage('Attendance already recorded.');
       setLoading(false);
+      return;
     }
-  };
 
-  if (sessionLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
-        <p className="mt-4 text-gray-500 font-bold uppercase text-[10px] tracking-widest">Verifying Session...</p>
-      </div>
-    );
-  }
+    const newRecord: AttendanceRecord = {
+      id: Math.random().toString(36).substr(2, 9),
+      sessionId: sessionId!,
+      studentName: name,
+      matricNo: matricNo.toUpperCase(),
+      department: department,
+      timestamp: Date.now(),
+      faceImage: faceImage,
+      location: {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      }
+    };
+
+    localStorage.setItem('attendx_records', JSON.stringify([...records, newRecord]));
+    localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
+    
+    setStatus('success');
+    setMessage(`Verified! Attendance logged for ${name}.`);
+    setLoading(false);
+  };
 
   if (status === 'expired') {
     return (
@@ -302,33 +224,10 @@ export const StudentPortal: React.FC = () => {
   if (!activeSession) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-xl text-center max-w-sm border border-gray-100">
-          <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
-            <i className="fas fa-exclamation-triangle text-2xl"></i>
-          </div>
-          <h2 className="text-xl font-black text-gray-900 uppercase tracking-tight">Session Unavailable</h2>
-          <p className="text-gray-500 text-sm mt-3 leading-relaxed">
-            {message || (!sessionId ? 'No session ID provided. Please use the link provided by your lecturer.' : 'The session link might be incorrect or has been removed.')}
-          </p>
-          
-          {message && (
-            <div className="mt-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
-              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">System Error Log</p>
-              <p className="text-[10px] text-gray-600 font-mono break-all">{message}</p>
-            </div>
-          )}
-          
-          <div className="mt-8 space-y-3">
-            <button 
-              onClick={() => window.location.reload()} 
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-200"
-            >
-              Retry Connection
-            </button>
-            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tighter">
-              Check your internet connection and try again
-            </p>
-          </div>
+        <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm">
+          <i className="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
+          <h2 className="text-xl font-bold">Session Unavailable</h2>
+          <button onClick={() => window.location.reload()} className="mt-6 text-blue-600 font-bold uppercase text-xs tracking-widest">Retry Connection</button>
         </div>
       </div>
     );

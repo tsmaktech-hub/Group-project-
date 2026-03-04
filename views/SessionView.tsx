@@ -3,9 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { User, AttendanceSession, AttendanceRecord, StudentStats } from '../types';
-import { COURSES } from '../constants';
+import { COURSES, DEPARTMENTS } from '../constants';
 import { analyzeAttendance } from '../services/geminiService';
-import { supabase } from '../services/supabase';
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000;
 
@@ -19,60 +18,23 @@ interface SessionViewProps {
 export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, onLogout, onEndSession }) => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [sessionData, setSessionData] = useState<AttendanceSession | null>(activeSession);
   const [aiInsights, setAiInsights] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedFace, setSelectedFace] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchSessionAndRecords = async () => {
-      setLoading(true);
-      const { data: session, error: sessionError } = await supabase
-        .from('attendance_sessions')
-        .select('*')
-        .eq('id', sessionId)
-        .single();
-
-      if (session) {
-        setSessionData(session);
-      }
-
-      const { data: initialRecords, error: recordsError } = await supabase
-        .from('attendance_records')
-        .select('*')
-        .eq('sessionId', sessionId)
-        .order('timestamp', { ascending: false });
-
-      if (initialRecords) {
-        setRecords(initialRecords);
-      }
-      setLoading(false);
+    const fetchRecords = () => {
+      const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+      const filtered = allRecords.filter(r => r.sessionId === sessionId);
+      setRecords(filtered.sort((a, b) => b.timestamp - a.timestamp));
     };
 
-    fetchSessionAndRecords();
-
-    // Set up real-time subscription for new records
-    const channel = supabase
-      .channel(`session-${sessionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'attendance_records',
-          filter: `sessionId=eq.${sessionId}`
-        },
-        (payload) => {
-          setRecords(prev => [payload.new as AttendanceRecord, ...prev]);
-        }
-      )
-      .subscribe();
-
     const updateTimer = () => {
-      if (sessionData && sessionData.active) {
-        const diff = LINK_EXPIRY_MS - (Date.now() - sessionData.startTime);
+      const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+      const sess = sessions.find(s => s.id === sessionId);
+      if (sess && sess.active) {
+        const diff = LINK_EXPIRY_MS - (Date.now() - sess.startTime);
         if (diff <= 0) {
           setTimeLeft('EXPIRED');
         } else {
@@ -83,87 +45,56 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
       }
     };
 
+    fetchRecords();
     updateTimer();
     const interval = setInterval(() => {
+      fetchRecords();
       updateTimer();
     }, 1000);
-
-    return () => {
-      clearInterval(interval);
-      supabase.removeChannel(channel);
-    };
-  }, [sessionId, sessionData?.active, sessionData?.startTime]);
-
-  const handleEndSession = async () => {
-    if (!sessionId) return;
-    try {
-      const { error } = await supabase
-        .from('attendance_sessions')
-        .update({ active: false, endTime: Date.now() })
-        .eq('id', sessionId);
-
-      if (error) throw error;
-      
-      setSessionData(prev => prev ? { ...prev, active: false, endTime: Date.now() } : null);
-      onEndSession(sessionId);
-    } catch (err: any) {
-      alert(err.message || 'Failed to end session');
-    }
-  };
+    return () => clearInterval(interval);
+  }, [sessionId]);
 
   const runAiAnalysis = async () => {
-    if (records.length === 0 || !sessionData) return;
+    if (records.length === 0) return;
     setAnalyzing(true);
     
-    try {
-      const { data: allSessions } = await supabase
-        .from('attendance_sessions')
-        .select('*')
-        .eq('courseId', sessionData.courseId);
-
-      const { data: allRecords } = await supabase
-        .from('attendance_records')
-        .select('*')
-        .in('sessionId', (allSessions || []).map(s => s.id));
-
-      if (!allSessions || !allRecords) throw new Error('Failed to fetch data for analysis');
-
-      const realStats: StudentStats[] = records.map(r => {
-        const studentHistoryForCourse = allRecords.filter(rec => 
-          rec.matricNo === r.matricNo
-        );
-        
-        const count = studentHistoryForCourse.length;
-        const pct = allSessions.length > 0 ? (count / allSessions.length) * 100 : 0;
-        
-        return {
-          matricNo: r.matricNo,
-          name: r.studentName,
-          sessionsAttended: count,
-          totalSessions: allSessions.length,
-          percentage: pct,
-          eligible: pct >= 75
-        };
-      });
-
-      const insight = await analyzeAttendance(realStats);
-      setAiInsights(insight);
-    } catch (err: any) {
-      setAiInsights('Analysis failed: ' + err.message);
-    } finally {
+    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+    const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+    
+    const currentSessionData = activeSession || allSessions.find(s => s.id === sessionId);
+    if (!currentSessionData) {
       setAnalyzing(false);
+      return;
     }
+
+    const courseSessions = allSessions.filter(s => s.courseId === currentSessionData.courseId);
+    
+    const realStats: StudentStats[] = records.map(r => {
+      const studentHistoryForCourse = allRecords.filter(rec => 
+        rec.matricNo === r.matricNo && 
+        courseSessions.some(sess => sess.id === rec.sessionId)
+      );
+      
+      const count = studentHistoryForCourse.length;
+      const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
+      
+      return {
+        matricNo: r.matricNo,
+        name: r.studentName,
+        sessionsAttended: count,
+        totalSessions: courseSessions.length,
+        percentage: pct,
+        eligible: pct >= 75
+      };
+    });
+
+    const insight = await analyzeAttendance(realStats);
+    setAiInsights(insight);
+    setAnalyzing(false);
   };
 
-  if (loading) {
-    return (
-      <Layout onLogout={onLogout} showLogout>
-        <div className="flex items-center justify-center py-20">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
-        </div>
-      </Layout>
-    );
-  }
+  const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  const sessionData = activeSession || sessions.find(s => s.id === sessionId);
 
   if (!sessionData) {
     return (
@@ -177,23 +108,10 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
   }
 
   const course = COURSES.find(c => c.id === sessionData.courseId);
-  const portalUrl = `${window.location.origin}/#/portal/${sessionData.id}`;
-  const isDevUrl = window.location.origin.includes('run.app');
+  const portalUrl = `${window.location.origin}${window.location.pathname}#/portal/${sessionData.id}`;
 
   return (
     <Layout title="Live Verification" onLogout={onLogout} showLogout>
-      {isDevUrl && (
-        <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start space-x-3">
-          <i className="fas fa-exclamation-triangle text-amber-600 mt-1"></i>
-          <div>
-            <p className="text-xs font-bold text-amber-800 uppercase tracking-tight">Private Preview Warning</p>
-            <p className="text-[11px] text-amber-700 mt-1">
-              You are currently in the <b>Private Preview</b> window. Links generated here will <b>NOT</b> work for students. 
-              Please use your production URL: <a href="https://t-black.vercel.app" target="_blank" className="underline font-bold">t-black.vercel.app</a>
-            </p>
-          </div>
-        </div>
-      )}
       {selectedFace && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 animate-in fade-in" onClick={() => setSelectedFace(null)}>
            <div className="bg-white rounded-3xl p-2 max-w-sm w-full relative animate-in zoom-in duration-200">
@@ -324,7 +242,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
             {sessionData.active && (
               <div className="bg-red-50 rounded-2xl border border-red-100 p-6">
                 <button 
-                  onClick={handleEndSession}
+                  onClick={() => onEndSession(sessionData.id)}
                   className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center space-x-2 text-xs uppercase shadow-lg shadow-red-200"
                 >
                   <i className="fas fa-power-off"></i>

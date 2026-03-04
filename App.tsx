@@ -7,109 +7,48 @@ import { SessionView } from './views/SessionView';
 import { StudentPortal } from './views/StudentPortal';
 import { HistoryView } from './views/HistoryView';
 import { AuditView } from './views/AuditView';
-import { User, AttendanceSession } from './types';
+import { User, AttendanceSession, AttendanceRecord } from './types';
 import { LogoutConfirmation } from './components/LogoutConfirmation';
-import { supabase } from './services/supabase';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+    const savedUser = localStorage.getItem('attendx_user');
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
 
-        if (profile) {
-          setCurrentUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            name: profile.name,
-            role: profile.role
-          });
-        } else {
-          // Fallback to user metadata if profile hasn't been created yet (trigger delay)
-          setCurrentUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            name: session.user.user_metadata?.name || 'User',
-            role: session.user.user_metadata?.role || 'lecturer'
-          });
-        }
-      }
-      setLoading(false);
-    };
-
-    checkSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        if (profile) {
-          setCurrentUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            name: profile.name,
-            role: profile.role
-          });
-          navigate('/dashboard');
-        } else {
-          // Fallback to user metadata
-          setCurrentUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            name: session.user.user_metadata?.name || 'User',
-            role: session.user.user_metadata?.role || 'lecturer'
-          });
-          navigate('/dashboard');
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        setActiveSession(null);
-        navigate('/');
-      }
-    });
-
-    const checkActiveSession = async () => {
-      const { data: sessions } = await supabase
-        .from('attendance_sessions')
-        .select('*')
-        .eq('active', true)
-        .order('startTime', { ascending: false })
-        .limit(1);
-
-      if (sessions && sessions.length > 0) {
-        setActiveSession(sessions[0]);
-      }
+    const checkActiveSession = () => {
+      const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+      const active = sessions.find(s => s.active);
+      if (active) setActiveSession(active);
     };
 
     checkActiveSession();
 
-    return () => subscription.unsubscribe();
-  }, [navigate]);
+    // Real-time feel: Listen for storage changes (e.g., student submission from another tab)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'attendx_records' || e.key === 'attendx_sessions') {
+        checkActiveSession();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   const handleLogin = (user: User) => {
+    localStorage.setItem('attendx_user', JSON.stringify(user));
     setCurrentUser(user);
     navigate('/dashboard');
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
+    localStorage.removeItem('attendx_user');
     setCurrentUser(null);
     setActiveSession(null);
     setShowLogoutModal(false);
@@ -117,31 +56,30 @@ const App: React.FC = () => {
   };
 
   const startSession = (session: AttendanceSession) => {
+    const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+    const updatedSessions = [...sessions.map((s: any) => ({ ...s, active: false })), session];
+    localStorage.setItem('attendx_sessions', JSON.stringify(updatedSessions));
     setActiveSession(session);
     navigate(`/session/${session.id}`);
   };
 
   const endSession = (sessionId: string) => {
+    const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+    const updatedSessions = sessions.map(s => 
+      s.id === sessionId ? { ...s, active: false, endTime: Date.now() } : s
+    );
+    localStorage.setItem('attendx_sessions', JSON.stringify(updatedSessions));
     setActiveSession(null);
     navigate('/dashboard');
   };
 
   // Guard routes
   useEffect(() => {
-    if (loading) return;
     const isStudentPortal = location.pathname.startsWith('/portal/');
     if (!currentUser && !isStudentPortal && location.pathname !== '/' && location.pathname !== '/signup') {
       navigate('/');
     }
-  }, [currentUser, location, navigate, loading]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
+  }, [currentUser, location, navigate]);
 
   return (
     <>

@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { User } from '../types';
-import { supabase } from '../services/supabase';
 
 interface AuthViewProps {
   mode: 'login' | 'signup';
@@ -14,78 +13,21 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const isPlaceholder = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL === 'your_supabase_project_url';
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isPlaceholder) {
-      setError('Supabase is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables.');
-      return;
-    }
     setLoading(true);
-    setError(null);
     
-    try {
-      if (mode === 'signup') {
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              name,
-              role: 'lecturer'
-            }
-          }
-        });
-
-        if (authError) throw authError;
-
-        if (authData.user) {
-          // We rely on a database trigger to create the profile record.
-          // This avoids RLS issues with unconfirmed emails.
-          onAuth({
-            id: authData.user.id,
-            name,
-            email,
-            role: 'lecturer'
-          });
-        }
-      } else {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (authError) throw authError;
-
-        if (authData.user) {
-          const { data: profile, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', authData.user.id)
-            .single();
-
-          if (profileError) throw profileError;
-
-          onAuth({
-            id: authData.user.id,
-            name: profile.name,
-            email,
-            role: profile.role
-          });
-        }
-      }
-    } catch (err: any) {
-      let message = err.message || 'An error occurred during authentication';
-      if (message === 'Invalid login credentials') {
-        message = 'Invalid email or password. If you just signed up, please check your email for a confirmation link (or disable "Confirm Email" in your Supabase Auth settings).';
-      }
-      setError(message);
-    } finally {
+    // Simulate API call
+    setTimeout(() => {
+      onAuth({
+        id: Math.random().toString(36).substr(2, 9),
+        name: mode === 'signup' ? name : 'Dr. Lecturer',
+        email,
+        role: 'lecturer'
+      });
       setLoading(false);
-    }
+    }, 1000);
   };
 
   return (
@@ -100,13 +42,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
             {mode === 'login' ? 'Welcome back, lecturer. Sign in to your dashboard.' : 'Create your lecturer account to get started.'}
           </p>
         </div>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-sm flex items-center space-x-3">
-            <i className="fas fa-exclamation-circle flex-shrink-0"></i>
-            <span>{error}</span>
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'signup' && (
