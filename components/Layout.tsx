@@ -15,7 +15,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title, onLogout, showL
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <i className="fas fa-id-badge text-2xl"></i>
-            <h1 className="text-xl font-bold tracking-tight">AttendX</h1>
+            <h1 className="text-xl font-bold tracking-tight">AttendXX</h1>
           </div>
           {title && <span className="hidden md:block font-medium text-blue-100">{title}</span>}
           <div className="flex items-center space-x-4">
@@ -37,7 +37,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title, onLogout, showL
       <footer className="bg-white border-t py-6">
         <div className="max-w-7xl mx-auto px-4 text-center">
           <p className="text-gray-500 text-sm">
-            &copy; {new Date().getFullYear()} AttendX Institutional System.
+            &copy; {new Date().getFullYear()} AttendXX Institutional System.
           </p>
           <p className="text-blue-600 text-xs font-bold mt-1 uppercase tracking-widest">
             Engineered by SIENA Group
