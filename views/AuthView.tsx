@@ -85,7 +85,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
           <div className="bg-blue-600 text-white p-4 rounded-2xl mb-4 shadow-lg">
             <i className="fas fa-id-badge text-3xl"></i>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">AttendXX Institutional</h1>
+          <h1 className="text-2xl font-bold text-gray-900">AttendX Institutional</h1>
           <p className="text-gray-500 mt-2 text-center">
             {mode === 'login' ? 'Welcome back, lecturer. Sign in to your dashboard.' : 'Create your lecturer account to get started.'}
           </p>
