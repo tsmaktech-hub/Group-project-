@@ -6,6 +6,12 @@ export interface User {
   role: 'lecturer' | 'student';
 }
 
+export interface Profile {
+  id: string;
+  name: string;
+  role: 'lecturer' | 'student';
+}
+
 export interface Department {
   id: string;
   name: string;

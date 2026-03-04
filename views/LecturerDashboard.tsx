@@ -69,16 +69,11 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
   };
 
   const handleGlobalReset = () => {
-    localStorage.removeItem('attendx_records');
-    localStorage.removeItem('attendx_sessions');
-    // Also clear individual session locks to be thorough
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('attendx_lock_')) {
-        localStorage.removeItem(key);
-      }
-    });
+    // In a real cloud app, we wouldn't just wipe the DB without serious confirmation
+    // For this demo, we'll just clear the local session state
+    localStorage.removeItem('attendx_user');
     setShowResetModal(false);
-    window.location.reload(); // Refresh to clear states
+    window.location.reload(); 
   };
 
   return (

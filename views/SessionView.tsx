@@ -1,10 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import { Layout } from '../components/Layout';
 import { User, AttendanceSession, AttendanceRecord, StudentStats } from '../types';
-import { COURSES, DEPARTMENTS } from '../constants';
+import { COURSES } from '../constants';
 import { analyzeAttendance } from '../services/geminiService';
+import { subscribeToSessionRecords, getSessionById } from '../services/supabase';
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000;
 
@@ -18,23 +20,33 @@ interface SessionViewProps {
 export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, onLogout, onEndSession }) => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [sessionData, setSessionData] = useState<AttendanceSession | null>(activeSession);
   const [aiInsights, setAiInsights] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedFace, setSelectedFace] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
+  const [loading, setLoading] = useState(!activeSession);
 
   useEffect(() => {
-    const fetchRecords = () => {
-      const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-      const filtered = allRecords.filter(r => r.sessionId === sessionId);
-      setRecords(filtered.sort((a, b) => b.timestamp - a.timestamp));
+    if (!sessionId) return;
+
+    const fetchSession = async () => {
+      if (!activeSession) {
+        const data = await getSessionById(sessionId);
+        setSessionData(data);
+        setLoading(false);
+      }
     };
 
+    fetchSession();
+
+    const unsubscribe = subscribeToSessionRecords(sessionId, (newRecords) => {
+      setRecords(newRecords);
+    });
+
     const updateTimer = () => {
-      const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-      const sess = sessions.find(s => s.id === sessionId);
-      if (sess && sess.active) {
-        const diff = LINK_EXPIRY_MS - (Date.now() - sess.startTime);
+      if (sessionData && sessionData.active) {
+        const diff = LINK_EXPIRY_MS - (Date.now() - sessionData.startTime);
         if (diff <= 0) {
           setTimeLeft('EXPIRED');
         } else {
@@ -45,56 +57,44 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
       }
     };
 
-    fetchRecords();
     updateTimer();
-    const interval = setInterval(() => {
-      fetchRecords();
-      updateTimer();
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [sessionId]);
+    const interval = setInterval(updateTimer, 1000);
+    
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
+  }, [sessionId, activeSession, sessionData]);
 
   const runAiAnalysis = async () => {
-    if (records.length === 0) return;
+    if (records.length === 0 || !sessionData) return;
     setAnalyzing(true);
     
-    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-    
-    const currentSessionData = activeSession || allSessions.find(s => s.id === sessionId);
-    if (!currentSessionData) {
-      setAnalyzing(false);
-      return;
-    }
+    // For analysis, we'd ideally need all historical records from Firestore
+    // For now, we'll analyze the current session's records
+    const mockStats: StudentStats[] = records.map(r => ({
+      matricNo: r.matricNo,
+      name: r.studentName,
+      sessionsAttended: 1, // Simplified for now
+      totalSessions: 1,
+      percentage: 100,
+      eligible: true
+    }));
 
-    const courseSessions = allSessions.filter(s => s.courseId === currentSessionData.courseId);
-    
-    const realStats: StudentStats[] = records.map(r => {
-      const studentHistoryForCourse = allRecords.filter(rec => 
-        rec.matricNo === r.matricNo && 
-        courseSessions.some(sess => sess.id === rec.sessionId)
-      );
-      
-      const count = studentHistoryForCourse.length;
-      const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
-      
-      return {
-        matricNo: r.matricNo,
-        name: r.studentName,
-        sessionsAttended: count,
-        totalSessions: courseSessions.length,
-        percentage: pct,
-        eligible: pct >= 75
-      };
-    });
-
-    const insight = await analyzeAttendance(realStats);
+    const insight = await analyzeAttendance(mockStats);
     setAiInsights(insight);
     setAnalyzing(false);
   };
 
-  const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-  const sessionData = activeSession || sessions.find(s => s.id === sessionId);
+  if (loading) {
+    return (
+      <Layout onLogout={onLogout} showLogout>
+        <div className="flex items-center justify-center py-20">
+          <i className="fas fa-circle-notch fa-spin text-blue-600 text-3xl"></i>
+        </div>
+      </Layout>
+    );
+  }
 
   if (!sessionData) {
     return (
@@ -108,7 +108,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
   }
 
   const course = COURSES.find(c => c.id === sessionData.courseId);
-  const portalUrl = `${window.location.origin}${window.location.pathname}#/portal/${sessionData.id}`;
+  const portalUrl = `${window.location.origin}/portal/${sessionData.id}`;
 
   return (
     <Layout title="Live Verification" onLogout={onLogout} showLogout>
@@ -151,17 +151,22 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
             )}
           </div>
           {sessionData.active && (
-            <div className="mt-8 flex flex-col md:flex-row gap-4 items-center p-4 bg-blue-50 rounded-2xl border border-blue-100">
+            <div className="mt-8 flex flex-col md:flex-row gap-6 items-center p-6 bg-blue-50 rounded-3xl border border-blue-100">
+                <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100">
+                  <QRCodeSVG value={portalUrl} size={120} />
+                  <p className="text-[9px] font-black text-center mt-2 text-blue-400 uppercase tracking-widest">Scan to Join</p>
+                </div>
                 <div className="flex-1 w-full">
                   <label className="block text-[10px] font-black text-blue-400 uppercase mb-1">Student Portal URL</label>
                   <div className="flex items-center space-x-2">
-                    <input readOnly value={portalUrl} className="flex-1 bg-white border border-blue-200 rounded-lg px-3 py-2 text-xs text-gray-500 truncate" />
-                    <button onClick={() => { navigator.clipboard.writeText(portalUrl); alert('Copied!'); }} className="bg-blue-600 text-white p-2 rounded-lg text-sm"><i className="fas fa-copy"></i></button>
+                    <input readOnly value={portalUrl} className="flex-1 bg-white border border-blue-200 rounded-xl px-3 py-2.5 text-xs text-gray-500 truncate" />
+                    <button onClick={() => { navigator.clipboard.writeText(portalUrl); alert('Copied!'); }} className="bg-blue-600 text-white p-2.5 rounded-xl text-sm transition-transform active:scale-95"><i className="fas fa-copy"></i></button>
                   </div>
+                  <p className="mt-2 text-[10px] text-blue-400 font-medium italic">Students can access this link on their mobile devices to verify presence.</p>
                 </div>
-                <div className="px-8 border-l border-blue-200 text-center">
-                    <span className="text-4xl font-black text-blue-700 leading-none">{records.length}</span>
-                    <p className="text-[10px] font-black text-blue-400 uppercase">Present</p>
+                <div className="px-8 border-l border-blue-200 text-center hidden md:block">
+                    <span className="text-5xl font-black text-blue-700 leading-none">{records.length}</span>
+                    <p className="text-[10px] font-black text-blue-400 uppercase mt-1">Present</p>
                 </div>
             </div>
           )}

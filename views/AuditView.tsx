@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
-import { AttendanceSession, AttendanceRecord, StudentStats } from '../types';
+import { StudentStats } from '../types';
 import { COURSES } from '../constants';
+import { getSessionsByCourse, getRecordsBySessions } from '../services/supabase';
 
 interface AuditViewProps {
   onLogout: () => void;
@@ -13,45 +14,61 @@ export const AuditView: React.FC<AuditViewProps> = ({ onLogout }) => {
   const { courseId } = useParams<{ courseId: string }>();
   const [stats, setStats] = useState<StudentStats[]>([]);
   const [totalSessions, setTotalSessions] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const course = COURSES.find(c => c.id === courseId);
 
   useEffect(() => {
-    const allSessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const courseSessions = allSessions.filter(s => s.courseId === courseId);
-    setTotalSessions(courseSessions.length);
+    const fetchAuditData = async () => {
+      if (!courseId) return;
+      try {
+        const courseSessions = await getSessionsByCourse(courseId);
+        setTotalSessions(courseSessions.length);
 
-    const allRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-    const courseRecords = allRecords.filter(r => courseSessions.some(s => s.id === r.sessionId));
+        const sessionIds = courseSessions.map(s => s.id);
+        const courseRecords = await getRecordsBySessions(sessionIds);
 
-    // Group by matric no
-    const studentMap: Record<string, { name: string; count: number }> = {};
-    courseRecords.forEach(r => {
-      if (!studentMap[r.matricNo]) {
-        studentMap[r.matricNo] = { name: r.studentName, count: 0 };
+        // Group by matric no
+        const studentMap: Record<string, { name: string; count: number }> = {};
+        courseRecords.forEach(r => {
+          if (!studentMap[r.matricNo]) {
+            studentMap[r.matricNo] = { name: r.studentName, count: 0 };
+          }
+          studentMap[r.matricNo].count += 1;
+        });
+
+        const calculatedStats: StudentStats[] = Object.keys(studentMap).map(matric => {
+          const { name, count } = studentMap[matric];
+          const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
+          return {
+            matricNo: matric,
+            name,
+            sessionsAttended: count,
+            totalSessions: courseSessions.length,
+            percentage: pct,
+            eligible: pct >= 75
+          };
+        });
+
+        setStats(calculatedStats.sort((a, b) => b.percentage - a.percentage));
+      } catch (error) {
+        console.error("Audit fetch error:", error);
+      } finally {
+        setLoading(false);
       }
-      studentMap[r.matricNo].count += 1;
-    });
+    };
 
-    const calculatedStats: StudentStats[] = Object.keys(studentMap).map(matric => {
-      const { name, count } = studentMap[matric];
-      const pct = courseSessions.length > 0 ? (count / courseSessions.length) * 100 : 0;
-      return {
-        matricNo: matric,
-        name,
-        sessionsAttended: count,
-        totalSessions: courseSessions.length,
-        percentage: pct,
-        eligible: pct >= 75
-      };
-    });
-
-    setStats(calculatedStats.sort((a, b) => b.percentage - a.percentage));
+    fetchAuditData();
   }, [courseId]);
 
   return (
     <Layout title="Exam Eligibility Audit" onLogout={onLogout} showLogout>
-      <div className="space-y-6">
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <i className="fas fa-circle-notch fa-spin text-blue-600 text-3xl"></i>
+        </div>
+      ) : (
+        <div className="space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
@@ -141,6 +158,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ onLogout }) => {
           </div>
         </div>
       </div>
+      )}
     </Layout>
   );
 };

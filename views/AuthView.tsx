@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { User } from '../types';
+import { saveUser } from '../services/supabase';
 
 interface AuthViewProps {
   mode: 'login' | 'signup';
@@ -14,20 +15,30 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      onAuth({
-        id: Math.random().toString(36).substr(2, 9),
-        name: mode === 'signup' ? name : 'Dr. Lecturer',
-        email,
-        role: 'lecturer'
-      });
+    // Simulate API call for auth, but save to Firestore
+    const userId = Math.random().toString(36).substr(2, 9);
+    const user: User = {
+      id: userId,
+      name: mode === 'signup' ? name : 'Dr. Lecturer',
+      email,
+      role: 'lecturer'
+    };
+
+    try {
+      if (mode === 'signup') {
+        await saveUser(user);
+      }
+      onAuth(user);
+    } catch (error) {
+      console.error("Auth error:", error);
+      alert("Failed to connect to cloud storage.");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (

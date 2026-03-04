@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { DEPARTMENTS } from '../constants';
 import { AttendanceSession, AttendanceRecord } from '../types';
+import { getSessionById, addAttendanceRecord as submitAttendance, uploadFaceImage } from '../services/supabase';
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -27,7 +28,7 @@ export const StudentPortal: React.FC = () => {
   const [department, setDepartment] = useState('');
   const [sessionKey, setSessionKey] = useState('');
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'expired'>('idle');
+  const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'expired' | 'loading'>('loading');
   const [message, setMessage] = useState('');
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
   
@@ -36,20 +37,37 @@ export const StudentPortal: React.FC = () => {
   const [cameraActive, setCameraActive] = useState(false);
 
   useEffect(() => {
-    const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const found = sessions.find(s => s.id === sessionId);
-    
-    if (found) {
-      // Check for 30-minute expiration
-      const timeElapsed = Date.now() - found.startTime;
-      if (timeElapsed > LINK_EXPIRY_MS) {
-        setStatus('expired');
-        setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
-      } else {
-        setActiveSession(found);
-        startCamera();
+    const fetchSession = async () => {
+      if (!sessionId) return;
+      try {
+        const found = await getSessionById(sessionId);
+        
+        if (found) {
+          // Check for 30-minute expiration
+          const timeElapsed = Date.now() - found.startTime;
+          if (timeElapsed > LINK_EXPIRY_MS) {
+            setStatus('expired');
+            setMessage('This attendance link has expired. Links are only valid for 30 minutes.');
+          } else if (!found.active) {
+            setStatus('error');
+            setMessage('This session has been ended by the lecturer.');
+          } else {
+            setActiveSession(found);
+            setStatus('idle');
+            startCamera();
+          }
+        } else {
+          setStatus('error');
+          setMessage('Session not found. Please check the link.');
+        }
+      } catch (error) {
+        console.error("Error fetching session:", error);
+        setStatus('error');
+        setMessage('Failed to connect to cloud storage.');
       }
-    }
+    };
+
+    fetchSession();
   }, [sessionId]);
 
   const startCamera = async () => {
@@ -172,14 +190,16 @@ export const StudentPortal: React.FC = () => {
        return;
     }
 
-    const records: AttendanceRecord[] = JSON.parse(localStorage.getItem('attendx_records') || '[]');
-    const alreadySubmitted = records.some(r => r.sessionId === sessionId && r.matricNo.toUpperCase() === matricNo.toUpperCase());
-    
-    if (alreadySubmitted) {
-      setStatus('error');
-      setMessage('Attendance already recorded.');
-      setLoading(false);
-      return;
+    let faceImageUrl = '';
+    if (faceImage && cameraActive) {
+      try {
+        const response = await fetch(faceImage);
+        const blob = await response.blob();
+        faceImageUrl = await uploadFaceImage(sessionId!, matricNo.toUpperCase(), blob);
+      } catch (err) {
+        console.error("Face upload failed:", err);
+        // Continue without image if upload fails, or handle error
+      }
     }
 
     const newRecord: AttendanceRecord = {
@@ -189,19 +209,26 @@ export const StudentPortal: React.FC = () => {
       matricNo: matricNo.toUpperCase(),
       department: department,
       timestamp: Date.now(),
-      faceImage: faceImage,
+      faceImage: faceImageUrl || faceImage,
       location: {
         lat: position.coords.latitude,
         lng: position.coords.longitude
       }
     };
 
-    localStorage.setItem('attendx_records', JSON.stringify([...records, newRecord]));
-    localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
-    
-    setStatus('success');
-    setMessage(`Verified! Attendance logged for ${name}.`);
-    setLoading(false);
+    try {
+      await submitAttendance(newRecord);
+      localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
+      
+      setStatus('success');
+      setMessage(`Verified! Attendance logged for ${name}.`);
+    } catch (error) {
+      console.error("Error submitting attendance:", error);
+      setStatus('error');
+      setMessage('Failed to save attendance to cloud storage. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (status === 'expired') {

@@ -7,8 +7,9 @@ import { SessionView } from './views/SessionView';
 import { StudentPortal } from './views/StudentPortal';
 import { HistoryView } from './views/HistoryView';
 import { AuditView } from './views/AuditView';
-import { User, AttendanceSession, AttendanceRecord } from './types';
+import { User, AttendanceSession } from './types';
 import { LogoutConfirmation } from './components/LogoutConfirmation';
+import { getActiveSession, endSession as supabaseEndSession, createSession as supabaseCreateSession } from './services/supabase';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -20,30 +21,30 @@ const App: React.FC = () => {
   useEffect(() => {
     const savedUser = localStorage.getItem('attendx_user');
     if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
-
-    const checkActiveSession = () => {
-      const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-      const active = sessions.find(s => s.active);
-      if (active) setActiveSession(active);
-    };
-
-    checkActiveSession();
-
-    // Real-time feel: Listen for storage changes (e.g., student submission from another tab)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'attendx_records' || e.key === 'attendx_sessions') {
-        checkActiveSession();
+      const user = JSON.parse(savedUser);
+      setCurrentUser(user);
+      
+      if (user.role === 'lecturer') {
+        checkActiveSession(user.id);
       }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    }
   }, []);
+
+  const checkActiveSession = async (lecturerId: string) => {
+    try {
+      const active = await getActiveSession(lecturerId);
+      if (active) setActiveSession(active);
+    } catch (error) {
+      console.error("Error checking active session:", error);
+    }
+  };
 
   const handleLogin = (user: User) => {
     localStorage.setItem('attendx_user', JSON.stringify(user));
     setCurrentUser(user);
+    if (user.role === 'lecturer') {
+      checkActiveSession(user.id);
+    }
     navigate('/dashboard');
   };
 
@@ -55,22 +56,25 @@ const App: React.FC = () => {
     navigate('/');
   };
 
-  const startSession = (session: AttendanceSession) => {
-    const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const updatedSessions = [...sessions.map((s: any) => ({ ...s, active: false })), session];
-    localStorage.setItem('attendx_sessions', JSON.stringify(updatedSessions));
-    setActiveSession(session);
-    navigate(`/session/${session.id}`);
+  const startSession = async (session: AttendanceSession) => {
+    try {
+      const newSession = await supabaseCreateSession(session);
+      setActiveSession(newSession);
+      navigate(`/session/${newSession.id}`);
+    } catch (error) {
+      console.error("Error starting session:", error);
+      alert("Failed to start session in cloud storage. Please check your connection.");
+    }
   };
 
-  const endSession = (sessionId: string) => {
-    const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-    const updatedSessions = sessions.map(s => 
-      s.id === sessionId ? { ...s, active: false, endTime: Date.now() } : s
-    );
-    localStorage.setItem('attendx_sessions', JSON.stringify(updatedSessions));
-    setActiveSession(null);
-    navigate('/dashboard');
+  const endSession = async (sessionId: string) => {
+    try {
+      await supabaseEndSession(sessionId);
+      setActiveSession(null);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error("Error ending session:", error);
+    }
   };
 
   // Guard routes
