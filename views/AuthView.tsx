@@ -16,8 +16,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isPlaceholder = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL === 'your_supabase_project_url';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPlaceholder) {
+      setError('Supabase is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables.');
+      return;
+    }
     setLoading(true);
     setError(null);
     
@@ -72,7 +78,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ mode, onAuth }) => {
         }
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred during authentication');
+      let message = err.message || 'An error occurred during authentication';
+      if (message === 'Invalid login credentials') {
+        message = 'Invalid email or password. If you just signed up, please check your email for a confirmation link (or disable "Confirm Email" in your Supabase Auth settings).';
+      }
+      setError(message);
     } finally {
       setLoading(false);
     }
