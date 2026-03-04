@@ -178,9 +178,22 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
 
   const course = COURSES.find(c => c.id === sessionData.courseId);
   const portalUrl = `${window.location.origin}/#/portal/${sessionData.id}`;
+  const isDevUrl = window.location.origin.includes('run.app');
 
   return (
     <Layout title="Live Verification" onLogout={onLogout} showLogout>
+      {isDevUrl && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start space-x-3">
+          <i className="fas fa-exclamation-triangle text-amber-600 mt-1"></i>
+          <div>
+            <p className="text-xs font-bold text-amber-800 uppercase tracking-tight">Private Preview Warning</p>
+            <p className="text-[11px] text-amber-700 mt-1">
+              You are currently in the <b>Private Preview</b> window. Links generated here will <b>NOT</b> work for students. 
+              Please use your production URL: <a href="https://t-black.vercel.app" target="_blank" className="underline font-bold">t-black.vercel.app</a>
+            </p>
+          </div>
+        </div>
+      )}
       {selectedFace && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 animate-in fade-in" onClick={() => setSelectedFace(null)}>
            <div className="bg-white rounded-3xl p-2 max-w-sm w-full relative animate-in zoom-in duration-200">

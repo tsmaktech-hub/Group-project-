@@ -42,6 +42,9 @@ export const StudentPortal: React.FC = () => {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
+      console.log("StudentPortal: Initializing with sessionId:", sessionId);
+      console.log("StudentPortal: Supabase URL configured:", !!supabaseUrl);
+      
       if (!supabaseUrl || !supabaseKey || supabaseUrl === 'your_supabase_project_url') {
         setStatus('error');
         setMessage('Database connection not configured. Please set your Supabase environment variables.');
@@ -307,6 +310,13 @@ export const StudentPortal: React.FC = () => {
           <p className="text-gray-500 text-sm mt-3 leading-relaxed">
             {message || (!sessionId ? 'No session ID provided. Please use the link provided by your lecturer.' : 'The session link might be incorrect or has been removed.')}
           </p>
+          
+          {message && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">System Error Log</p>
+              <p className="text-[10px] text-gray-600 font-mono break-all">{message}</p>
+            </div>
+          )}
           
           <div className="mt-8 space-y-3">
             <button 
