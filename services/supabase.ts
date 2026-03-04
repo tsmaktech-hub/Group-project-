@@ -4,14 +4,24 @@ import { AttendanceSession, AttendanceRecord, User } from '../types';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+let supabaseClient: any = null;
+
+export const getSupabase = () => {
+  if (!supabaseClient) {
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('Supabase URL and Anon Key are required. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.');
+    }
+    supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  return supabaseClient;
+};
 
 const SESSIONS_TABLE = 'sessions';
 const RECORDS_TABLE = 'records';
 const BUCKET_NAME = 'face-images';
 
 export const createSession = async (sessionData: Omit<AttendanceSession, 'id'>) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .insert([sessionData])
     .select()
@@ -22,7 +32,7 @@ export const createSession = async (sessionData: Omit<AttendanceSession, 'id'>) 
 };
 
 export const getSession = async (sessionId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
     .eq('id', sessionId)
@@ -33,7 +43,7 @@ export const getSession = async (sessionId: string) => {
 };
 
 export const addAttendanceRecord = async (recordData: Omit<AttendanceRecord, 'id'>) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .insert([recordData])
     .select()
@@ -44,7 +54,7 @@ export const addAttendanceRecord = async (recordData: Omit<AttendanceRecord, 'id
 };
 
 export const getRecordsForSession = async (sessionId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .select('*')
     .eq('sessionId', sessionId)
@@ -55,7 +65,7 @@ export const getRecordsForSession = async (sessionId: string) => {
 };
 
 export const getActiveSession = async (lecturerId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
     .eq('lecturerId', lecturerId)
@@ -67,7 +77,7 @@ export const getActiveSession = async (lecturerId: string) => {
 };
 
 export const endSession = async (sessionId: string) => {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .update({ active: false, endTime: Date.now() })
     .eq('id', sessionId);
@@ -76,7 +86,7 @@ export const endSession = async (sessionId: string) => {
 };
 
 export const saveUser = async (user: User) => {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('users')
     .upsert([user]);
   
@@ -84,7 +94,7 @@ export const saveUser = async (user: User) => {
 };
 
 export const getSessionById = async (sessionId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
     .eq('id', sessionId)
@@ -99,7 +109,7 @@ export const subscribeToSessionRecords = (sessionId: string, callback: (records:
   getRecordsForSession(sessionId).then(callback);
 
   // Subscribe to changes
-  const channel = supabase
+  const channel = getSupabase()
     .channel(`session-records-${sessionId}`)
     .on(
       'postgres_changes',
@@ -117,12 +127,12 @@ export const subscribeToSessionRecords = (sessionId: string, callback: (records:
     .subscribe();
 
   return () => {
-    supabase.removeChannel(channel);
+    getSupabase().removeChannel(channel);
   };
 };
 
 export const getSessionsByLecturer = async (lecturerId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
     .eq('lecturerId', lecturerId)
@@ -133,7 +143,7 @@ export const getSessionsByLecturer = async (lecturerId: string) => {
 };
 
 export const getRecordCountForSession = async (sessionId: string) => {
-  const { count, error } = await supabase
+  const { count, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .select('*', { count: 'exact', head: true })
     .eq('sessionId', sessionId);
@@ -143,7 +153,7 @@ export const getRecordCountForSession = async (sessionId: string) => {
 };
 
 export const getSessionsByCourse = async (courseId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
     .eq('courseId', courseId);
@@ -154,7 +164,7 @@ export const getSessionsByCourse = async (courseId: string) => {
 
 export const getRecordsBySessions = async (sessionIds: string[]) => {
   if (sessionIds.length === 0) return [];
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .select('*')
     .in('sessionId', sessionIds);
@@ -165,7 +175,7 @@ export const getRecordsBySessions = async (sessionIds: string[]) => {
 
 export const uploadFaceImage = async (sessionId: string, matricNo: string, blob: Blob) => {
   const fileName = `${sessionId}/${matricNo}_${Date.now()}.jpg`;
-  const { data, error } = await supabase.storage
+  const { data, error } = await getSupabase().storage
     .from(BUCKET_NAME)
     .upload(fileName, blob, {
       contentType: 'image/jpeg',
@@ -174,7 +184,7 @@ export const uploadFaceImage = async (sessionId: string, matricNo: string, blob:
 
   if (error) throw error;
 
-  const { data: { publicUrl } } = supabase.storage
+  const { data: { publicUrl } } = getSupabase().storage
     .from(BUCKET_NAME)
     .getPublicUrl(fileName);
 
