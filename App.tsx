@@ -61,9 +61,10 @@ const App: React.FC = () => {
       const newSession = await supabaseCreateSession(session);
       setActiveSession(newSession);
       navigate(`/session/${newSession.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error starting session:", error);
-      alert("Failed to start session in cloud storage. Please check your connection.");
+      const msg = error?.message || "Please check your connection.";
+      alert(`Failed to start session in cloud storage. ${msg}`);
     }
   };
 

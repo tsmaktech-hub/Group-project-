@@ -20,15 +20,23 @@ const SESSIONS_TABLE = 'sessions';
 const RECORDS_TABLE = 'records';
 const BUCKET_NAME = 'face-images';
 
-export const createSession = async (sessionData: Omit<AttendanceSession, 'id'>) => {
+export const createSession = async (sessionData: AttendanceSession) => {
+  // Strip the frontend-generated ID to let Supabase generate a proper one if needed
+  // or just use it if the table allows text PKs. 
+  // However, it's safer to let the DB handle it or ensure it's a valid format.
+  const { id, ...rest } = sessionData;
+  
   const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
-    .insert([sessionData])
+    .insert([rest])
     .select()
     .single();
   
-  if (error) throw error;
-  return { ...data, id: data.id } as AttendanceSession;
+  if (error) {
+    console.error("Supabase Create Session Error:", error);
+    throw error;
+  }
+  return data as AttendanceSession;
 };
 
 export const getSession = async (sessionId: string) => {
@@ -42,14 +50,18 @@ export const getSession = async (sessionId: string) => {
   return data as AttendanceSession;
 };
 
-export const addAttendanceRecord = async (recordData: Omit<AttendanceRecord, 'id'>) => {
+export const addAttendanceRecord = async (recordData: AttendanceRecord) => {
+  const { id, ...rest } = recordData;
   const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
-    .insert([recordData])
+    .insert([rest])
     .select()
     .single();
   
-  if (error) throw error;
+  if (error) {
+    console.error("Supabase Add Record Error:", error);
+    throw error;
+  }
   return data as AttendanceRecord;
 };
 
@@ -90,7 +102,10 @@ export const saveUser = async (user: User) => {
     .from('users')
     .upsert([user]);
   
-  if (error) throw error;
+  if (error) {
+    console.error("Supabase Save User Error:", error);
+    throw error;
+  }
 };
 
 export const getSessionById = async (sessionId: string) => {
