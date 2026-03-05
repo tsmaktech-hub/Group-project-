@@ -7,20 +7,6 @@ import { getSessionById, addAttendanceRecord as submitAttendance, uploadFaceImag
 
 const LINK_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
-function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3;
-  const phi1 = lat1 * Math.PI / 180;
-  const phi2 = lat2 * Math.PI / 180;
-  const deltaPhi = (lat2 - lat1) * Math.PI / 180;
-  const deltaLambda = (lon2 - lon1) * Math.PI / 180;
-
-  const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-            Math.cos(phi1) * Math.cos(phi2) *
-            Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
 export const StudentPortal: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [name, setName] = useState('');
@@ -146,50 +132,6 @@ export const StudentPortal: React.FC = () => {
       return;
     }
 
-    const getLocation = (useHighAccuracy: boolean, timeout: number, maxAge: number) => {
-      return new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: useHighAccuracy,
-          timeout: timeout,
-          maximumAge: maxAge
-        });
-      });
-    };
-
-    let position: GeolocationPosition | null = null;
-
-    try {
-      position = await getLocation(true, 10000, 0);
-    } catch (e) {
-      try {
-        console.warn("GPS timed out, trying network positioning...");
-        position = await getLocation(false, 15000, 30000);
-      } catch (e2) {
-        setStatus('error');
-        setMessage('Location error: Unable to fix position. If you are indoors, try moving closer to a window.');
-        setLoading(false);
-        return;
-      }
-    }
-
-    if (!position) return;
-
-    const distance = getDistanceInMeters(
-      position.coords.latitude,
-      position.coords.longitude,
-      activeSession.location.lat,
-      activeSession.location.lng
-    );
-    
-    const allowedRadius = activeSession.radius + 75; 
-    
-    if (distance > allowedRadius) {
-       setStatus('error');
-       setMessage(`Too far from lecture hall (${Math.round(distance)}m). You must be present in class.`);
-       setLoading(false);
-       return;
-    }
-
     let faceImageUrl = '';
     if (faceImage && cameraActive) {
       try {
@@ -209,11 +151,7 @@ export const StudentPortal: React.FC = () => {
       matricNo: matricNo.toUpperCase(),
       department: department,
       timestamp: Date.now(),
-      faceImage: faceImageUrl || faceImage,
-      location: {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude
-      }
+      faceImage: faceImageUrl || faceImage
     };
 
     try {
@@ -267,7 +205,7 @@ export const StudentPortal: React.FC = () => {
           <h1 className="text-xl font-black uppercase tracking-tight">Institutional Attendance</h1>
           <div className="mt-2 inline-flex items-center space-x-2 bg-blue-700 px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest text-blue-100">
              <i className="fas fa-shield-alt"></i>
-             <span>Identity + Location Guard Active</span>
+             <span>Identity Guard Active</span>
           </div>
         </div>
 

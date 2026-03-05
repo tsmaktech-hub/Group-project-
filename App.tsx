@@ -59,12 +59,16 @@ const App: React.FC = () => {
   const startSession = async (session: AttendanceSession) => {
     try {
       const newSession = await supabaseCreateSession(session);
+      if (!newSession || !newSession.id) {
+        throw new Error("Session was created but no valid ID was returned.");
+      }
       setActiveSession(newSession);
       navigate(`/session/${newSession.id}`);
     } catch (error: any) {
       console.error("Error starting session:", error);
       const msg = error?.message || "Please check your connection.";
-      alert(`Failed to start session in cloud storage. ${msg}`);
+      const details = error?.details || error?.hint || "";
+      alert(`Failed to start session in cloud storage. \n\nError: ${msg} ${details ? `\nDetails: ${details}` : ''}`);
     }
   };
 

@@ -19,7 +19,3 @@ export const COURSES: Course[] = [
 ];
 
 export const LEVELS = ['100', '200', '300', '400', '500'];
-
-export const GEOCONFIG = {
-  DEFAULT_RADIUS: 100, // meters
-};

@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { User, AttendanceSession } from '../types';
-import { DEPARTMENTS, COURSES, LEVELS, GEOCONFIG } from '../constants';
+import { DEPARTMENTS, COURSES, LEVELS } from '../constants';
 import { ResetConfirmation } from '../components/ResetConfirmation';
 
 interface LecturerDashboardProps {
@@ -31,41 +31,32 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
     setLoading(true);
     setError('');
 
-    if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser.');
-      setLoading(false);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const sessionKey = Math.random().toString(36).substr(2, 6).toUpperCase();
-        const sessionId = Math.random().toString(36).substr(2, 9);
-        
-        const newSession: AttendanceSession = {
-          id: sessionId,
-          lecturerId: user?.id || 'anonymous',
-          courseId: selectedCourse,
-          departmentId: selectedDept,
-          level: selectedLevel,
-          sessionKey,
-          startTime: Date.now(),
-          location: {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          },
-          radius: GEOCONFIG.DEFAULT_RADIUS,
-          active: true
-        };
-
-        onStartSession(newSession);
-        setLoading(false);
-      },
-      (err) => {
-        setError('Failed to get your location. Please enable location services.');
-        setLoading(false);
+    // Helper to generate a robust 6-digit alphanumeric key
+    const generateKey = () => {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let result = '';
+      for (let i = 0; i < 6; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-    );
+      return result;
+    };
+
+    const sessionKey = generateKey();
+    const sessionId = Math.random().toString(36).substring(2, 11);
+    
+    const newSession: AttendanceSession = {
+      id: sessionId,
+      lecturerId: user?.id || 'anonymous',
+      courseId: selectedCourse,
+      departmentId: selectedDept,
+      level: selectedLevel,
+      sessionKey,
+      startTime: Date.now(),
+      active: true
+    };
+
+    onStartSession(newSession);
+    setLoading(false);
   };
 
   const handleGlobalReset = () => {

@@ -33,11 +33,6 @@ export interface AttendanceSession {
   sessionKey: string;
   startTime: number;
   endTime?: number;
-  location: {
-    lat: number;
-    lng: number;
-  };
-  radius: number;
   active: boolean;
 }
 
@@ -49,10 +44,6 @@ export interface AttendanceRecord {
   department: string;
   timestamp: number;
   faceImage?: string; // Base64 image data
-  location: {
-    lat: number;
-    lng: number;
-  };
 }
 
 export interface StudentStats {

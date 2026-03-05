@@ -22,8 +22,6 @@ const BUCKET_NAME = 'face-images';
 
 export const createSession = async (sessionData: AttendanceSession) => {
   // Strip the frontend-generated ID to let Supabase generate a proper one if needed
-  // or just use it if the table allows text PKs. 
-  // However, it's safer to let the DB handle it or ensure it's a valid format.
   const { id, ...rest } = sessionData;
   
   const { data, error } = await getSupabase()
@@ -34,8 +32,30 @@ export const createSession = async (sessionData: AttendanceSession) => {
   
   if (error) {
     console.error("Supabase Create Session Error:", error);
+    // If the error is about no rows returned, it's likely RLS blocking the select
+    if (error.code === 'PGRST116' && !data) {
+      console.warn("Session created but RLS blocked the return. Attempting to fetch manually...");
+      // Try to fetch it manually by sessionKey and startTime
+      const { data: manualData, error: manualError } = await getSupabase()
+        .from(SESSIONS_TABLE)
+        .select('*')
+        .eq('sessionKey', rest.sessionKey)
+        .eq('startTime', rest.startTime)
+        .single();
+      
+      if (manualError) {
+        console.error("Manual fetch failed:", manualError);
+        throw error;
+      }
+      return manualData as AttendanceSession;
+    }
     throw error;
   }
+  
+  if (!data) {
+    throw new Error("Session created but no data was returned from the database.");
+  }
+
   return data as AttendanceSession;
 };
 
