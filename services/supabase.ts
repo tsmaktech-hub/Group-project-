@@ -16,17 +16,27 @@ export const getSupabase = () => {
   return supabaseClient;
 };
 
-const SESSIONS_TABLE = 'sessions';
-const RECORDS_TABLE = 'records';
+const SESSIONS_TABLE = 'session';
+const RECORDS_TABLE = 'attendance_record';
 const BUCKET_NAME = 'face-images';
 
 export const createSession = async (sessionData: AttendanceSession) => {
-  // Strip the frontend-generated ID to let Supabase generate a proper one if needed
-  const { id, ...rest } = sessionData;
+  // Map camelCase to snake_case for Supabase
+  const dbData = {
+    lecturer_id: sessionData.lecturerId,
+    course_id: sessionData.courseId,
+    department_id: sessionData.departmentId,
+    level: sessionData.level,
+    session_key: sessionData.sessionKey,
+    start_time: sessionData.startTime,
+    active: sessionData.active,
+    latitude: sessionData.latitude,
+    longitude: sessionData.longitude
+  };
   
   const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
-    .insert([rest])
+    .insert([dbData])
     .select()
     .single();
   
@@ -35,19 +45,19 @@ export const createSession = async (sessionData: AttendanceSession) => {
     // If the error is about no rows returned, it's likely RLS blocking the select
     if (error.code === 'PGRST116' && !data) {
       console.warn("Session created but RLS blocked the return. Attempting to fetch manually...");
-      // Try to fetch it manually by sessionKey and startTime
+      // Try to fetch it manually by session_key and start_time
       const { data: manualData, error: manualError } = await getSupabase()
         .from(SESSIONS_TABLE)
         .select('*')
-        .eq('sessionKey', rest.sessionKey)
-        .eq('startTime', rest.startTime)
+        .eq('session_key', dbData.session_key)
+        .eq('start_time', dbData.start_time)
         .single();
       
       if (manualError) {
         console.error("Manual fetch failed:", manualError);
         throw error;
       }
-      return manualData as AttendanceSession;
+      return mapSessionFromDb(manualData);
     }
     throw error;
   }
@@ -56,8 +66,37 @@ export const createSession = async (sessionData: AttendanceSession) => {
     throw new Error("Session created but no data was returned from the database.");
   }
 
-  return data as AttendanceSession;
+  return mapSessionFromDb(data);
 };
+
+// Helper to map DB session to Frontend session
+const mapSessionFromDb = (data: any): AttendanceSession => ({
+  id: data.id,
+  lecturerId: data.lecturer_id,
+  courseId: data.course_id,
+  departmentId: data.department_id,
+  level: data.level,
+  sessionKey: data.session_key,
+  startTime: data.start_time,
+  endTime: data.end_time,
+  active: data.active,
+  latitude: data.latitude,
+  longitude: data.longitude
+});
+
+// Helper to map DB record to Frontend record
+const mapRecordFromDb = (data: any): AttendanceRecord => ({
+  id: data.id,
+  sessionId: data.session_id,
+  studentName: data.student_name,
+  matricNo: data.matric_no,
+  department: data.department,
+  timestamp: data.timestamp,
+  faceImage: data.face_image,
+  latitude: data.latitude,
+  longitude: data.longitude,
+  distance: data.distance
+});
 
 export const getSession = async (sessionId: string) => {
   const { data, error } = await getSupabase()
@@ -67,14 +106,25 @@ export const getSession = async (sessionId: string) => {
     .single();
   
   if (error) return null;
-  return data as AttendanceSession;
+  return mapSessionFromDb(data);
 };
 
 export const addAttendanceRecord = async (recordData: AttendanceRecord) => {
-  const { id, ...rest } = recordData;
+  const dbData = {
+    session_id: recordData.sessionId,
+    student_name: recordData.studentName,
+    matric_no: recordData.matricNo,
+    department: recordData.department,
+    timestamp: recordData.timestamp,
+    face_image: recordData.faceImage,
+    latitude: recordData.latitude,
+    longitude: recordData.longitude,
+    distance: recordData.distance
+  };
+
   const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
-    .insert([rest])
+    .insert([dbData])
     .select()
     .single();
   
@@ -82,36 +132,36 @@ export const addAttendanceRecord = async (recordData: AttendanceRecord) => {
     console.error("Supabase Add Record Error:", error);
     throw error;
   }
-  return data as AttendanceRecord;
+  return mapRecordFromDb(data);
 };
 
 export const getRecordsForSession = async (sessionId: string) => {
   const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .select('*')
-    .eq('sessionId', sessionId)
+    .eq('session_id', sessionId)
     .order('timestamp', { ascending: false });
   
   if (error) throw error;
-  return data as AttendanceRecord[];
+  return data.map(mapRecordFromDb);
 };
 
 export const getActiveSession = async (lecturerId: string) => {
   const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
-    .eq('lecturerId', lecturerId)
+    .eq('lecturer_id', lecturerId)
     .eq('active', true)
     .single();
   
   if (error) return null;
-  return data as AttendanceSession;
+  return mapSessionFromDb(data);
 };
 
 export const endSession = async (sessionId: string) => {
   const { error } = await getSupabase()
     .from(SESSIONS_TABLE)
-    .update({ active: false, endTime: Date.now() })
+    .update({ active: false, end_time: Date.now() })
     .eq('id', sessionId);
   
   if (error) throw error;
@@ -136,7 +186,7 @@ export const getSessionById = async (sessionId: string) => {
     .single();
   
   if (error) return null;
-  return data as AttendanceSession;
+  return mapSessionFromDb(data);
 };
 
 export const subscribeToSessionRecords = (sessionId: string, callback: (records: AttendanceRecord[]) => void) => {
@@ -152,7 +202,7 @@ export const subscribeToSessionRecords = (sessionId: string, callback: (records:
         event: 'INSERT',
         schema: 'public',
         table: RECORDS_TABLE,
-        filter: `sessionId=eq.${sessionId}`
+        filter: `session_id=eq.${sessionId}`
       },
       () => {
         // Re-fetch all records for simplicity and consistency
@@ -170,18 +220,18 @@ export const getSessionsByLecturer = async (lecturerId: string) => {
   const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
-    .eq('lecturerId', lecturerId)
-    .order('startTime', { ascending: false });
+    .eq('lecturer_id', lecturerId)
+    .order('start_time', { ascending: false });
   
   if (error) throw error;
-  return data as AttendanceSession[];
+  return data.map(mapSessionFromDb);
 };
 
 export const getRecordCountForSession = async (sessionId: string) => {
   const { count, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .select('*', { count: 'exact', head: true })
-    .eq('sessionId', sessionId);
+    .eq('session_id', sessionId);
   
   if (error) throw error;
   return count || 0;
@@ -191,10 +241,10 @@ export const getSessionsByCourse = async (courseId: string) => {
   const { data, error } = await getSupabase()
     .from(SESSIONS_TABLE)
     .select('*')
-    .eq('courseId', courseId);
+    .eq('course_id', courseId);
   
   if (error) throw error;
-  return data as AttendanceSession[];
+  return data.map(mapSessionFromDb);
 };
 
 export const getRecordsBySessions = async (sessionIds: string[]) => {
@@ -202,10 +252,10 @@ export const getRecordsBySessions = async (sessionIds: string[]) => {
   const { data, error } = await getSupabase()
     .from(RECORDS_TABLE)
     .select('*')
-    .in('sessionId', sessionIds);
+    .in('session_id', sessionIds);
   
   if (error) throw error;
-  return data as AttendanceRecord[];
+  return data.map(mapRecordFromDb);
 };
 
 export const uploadFaceImage = async (sessionId: string, matricNo: string, blob: Blob) => {
