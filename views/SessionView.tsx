@@ -184,6 +184,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
                   <tr>
                     <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Student</th>
                     <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Matric No</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Location</th>
                     <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Time</th>
                     <th className="px-6 py-4 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Face ID</th>
                   </tr>
@@ -205,6 +206,16 @@ export const SessionView: React.FC<SessionViewProps> = ({ user, activeSession, o
                           </div>
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-gray-900">{record.matricNo}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className={`text-[10px] font-black uppercase ${record.distance && record.distance > 150 ? 'text-red-500' : 'text-green-600'}`}>
+                              {record.distance ? `${Math.round(record.distance)}m away` : 'No Data'}
+                            </span>
+                            <span className="text-[9px] text-gray-400 font-medium">
+                              {record.latitude?.toFixed(4)}, {record.longitude?.toFixed(4)}
+                            </span>
+                          </div>
+                        </td>
                         <td className="px-6 py-4 text-xs text-gray-500 font-medium">{new Date(record.timestamp).toLocaleTimeString()}</td>
                         <td className="px-6 py-4 text-right">
                           {record.faceImage ? (
