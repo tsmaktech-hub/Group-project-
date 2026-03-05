@@ -34,6 +34,8 @@ export interface AttendanceSession {
   startTime: number;
   endTime?: number;
   active: boolean;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface AttendanceRecord {
@@ -44,6 +46,9 @@ export interface AttendanceRecord {
   department: string;
   timestamp: number;
   faceImage?: string; // Base64 image data
+  latitude?: number;
+  longitude?: number;
+  distance?: number;
 }
 
 export interface StudentStats {

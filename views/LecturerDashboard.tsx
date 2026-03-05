@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { User, AttendanceSession } from '../types';
-import { DEPARTMENTS, COURSES, LEVELS } from '../constants';
+import { DEPARTMENTS, COURSES, LEVELS, GEOCONFIG } from '../constants';
 import { ResetConfirmation } from '../components/ResetConfirmation';
 
 interface LecturerDashboardProps {
@@ -17,6 +17,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
   const [selectedLevel, setSelectedLevel] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [error, setError] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
 
@@ -29,34 +30,64 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
     }
 
     setLoading(true);
+    setLocationLoading(true);
     setError('');
 
-    // Helper to generate a robust 6-digit alphanumeric key
-    const generateKey = () => {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      let result = '';
-      for (let i = 0; i < 6; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return result;
-    };
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported by your browser.');
+      setLoading(false);
+      setLocationLoading(false);
+      return;
+    }
 
-    const sessionKey = generateKey();
-    const sessionId = Math.random().toString(36).substring(2, 11);
-    
-    const newSession: AttendanceSession = {
-      id: sessionId,
-      lecturerId: user?.id || 'anonymous',
-      courseId: selectedCourse,
-      departmentId: selectedDept,
-      level: selectedLevel,
-      sessionKey,
-      startTime: Date.now(),
-      active: true
-    };
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        
+        // Helper to generate a robust 6-digit alphanumeric key
+        const generateKey = () => {
+          const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          let result = '';
+          for (let i = 0; i < 6; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          return result;
+        };
 
-    onStartSession(newSession);
-    setLoading(false);
+        const sessionKey = generateKey();
+        const sessionId = Math.random().toString(36).substring(2, 11);
+        
+        const newSession: AttendanceSession = {
+          id: sessionId,
+          lecturerId: user?.id || 'anonymous',
+          courseId: selectedCourse,
+          departmentId: selectedDept,
+          level: selectedLevel,
+          sessionKey,
+          startTime: Date.now(),
+          active: true,
+          latitude,
+          longitude
+        };
+
+        onStartSession(newSession);
+        setLoading(false);
+        setLocationLoading(false);
+      },
+      (err) => {
+        console.error("Location error:", err);
+        let msg = 'Failed to get your location. ';
+        if (err.code === 1) msg += 'Permission denied.';
+        else if (err.code === 2) msg += 'Position unavailable.';
+        else if (err.code === 3) msg += 'Location request timed out. Please try again.';
+        else msg += 'Unknown error.';
+        
+        setError(msg);
+        setLoading(false);
+        setLocationLoading(false);
+      },
+      GEOCONFIG
+    );
   };
 
   const handleGlobalReset = () => {
@@ -144,7 +175,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center space-x-2 text-lg"
               >
                 {loading ? (
-                  <i className="fas fa-circle-notch fa-spin"></i>
+                  <>
+                    <i className="fas fa-circle-notch fa-spin"></i>
+                    <span>{locationLoading ? 'Getting Location...' : 'Starting Session...'}</span>
+                  </>
                 ) : (
                   <>
                     <i className="fas fa-satellite-dish"></i>

@@ -19,3 +19,10 @@ export const COURSES: Course[] = [
 ];
 
 export const LEVELS = ['100', '200', '300', '400', '500'];
+
+export const GEOCONFIG = {
+  timeout: 20000, // 20 seconds
+  maximumAge: 60000, // 1 minute
+  enableHighAccuracy: true,
+  radius: 100, // 100 meters
+};

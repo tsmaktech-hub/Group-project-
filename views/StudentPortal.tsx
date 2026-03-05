@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { DEPARTMENTS } from '../constants';
+import { DEPARTMENTS, GEOCONFIG } from '../constants';
 import { AttendanceSession, AttendanceRecord } from '../types';
 import { getSessionById, addAttendanceRecord as submitAttendance, uploadFaceImage } from '../services/supabase';
 
@@ -86,6 +86,21 @@ export const StudentPortal: React.FC = () => {
     performAttendanceCheck();
   };
 
+  const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371e3; // metres
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c; // in metres
+  };
+
   const performAttendanceCheck = async () => {
     setLoading(true);
     setStatus('idle');
@@ -124,49 +139,93 @@ export const StudentPortal: React.FC = () => {
       return;
     }
 
-    const faceImage = captureImage();
-    if (!faceImage && cameraActive) {
+    // Get student location
+    if (!navigator.geolocation) {
       setStatus('error');
-      setMessage('Face capture failed. Please ensure camera is allowed.');
+      setMessage('Geolocation is not supported by your browser.');
       setLoading(false);
       return;
     }
 
-    let faceImageUrl = '';
-    if (faceImage && cameraActive) {
-      try {
-        const response = await fetch(faceImage);
-        const blob = await response.blob();
-        faceImageUrl = await uploadFaceImage(sessionId!, matricNo.toUpperCase(), blob);
-      } catch (err) {
-        console.error("Face upload failed:", err);
-        // Continue without image if upload fails, or handle error
-      }
-    }
+    setStatus('loading');
+    setMessage('Verifying location...');
 
-    const newRecord: AttendanceRecord = {
-      id: Math.random().toString(36).substr(2, 9),
-      sessionId: sessionId!,
-      studentName: name,
-      matricNo: matricNo.toUpperCase(),
-      department: department,
-      timestamp: Date.now(),
-      faceImage: faceImageUrl || faceImage
-    };
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        
+        // Check distance if session has location
+        let distance = 0;
+        if (activeSession.latitude && activeSession.longitude) {
+          distance = getDistance(latitude, longitude, activeSession.latitude, activeSession.longitude);
+          // Allow some buffer for indoor GPS drift
+          if (distance > GEOCONFIG.radius + 50) { 
+             setStatus('error');
+             setMessage(`Location mismatch. You are ${Math.round(distance)}m away from the lecture hall.`);
+             setLoading(false);
+             return;
+          }
+        }
 
-    try {
-      await submitAttendance(newRecord);
-      localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
-      
-      setStatus('success');
-      setMessage(`Verified! Attendance logged for ${name}.`);
-    } catch (error) {
-      console.error("Error submitting attendance:", error);
-      setStatus('error');
-      setMessage('Failed to save attendance to cloud storage. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+        const faceImage = captureImage();
+        if (!faceImage && cameraActive) {
+          setStatus('error');
+          setMessage('Face capture failed. Please ensure camera is allowed.');
+          setLoading(false);
+          return;
+        }
+
+        let faceImageUrl = '';
+        if (faceImage && cameraActive) {
+          try {
+            const response = await fetch(faceImage);
+            const blob = await response.blob();
+            faceImageUrl = await uploadFaceImage(sessionId!, matricNo.toUpperCase(), blob);
+          } catch (err) {
+            console.error("Face upload failed:", err);
+          }
+        }
+
+        const newRecord: AttendanceRecord = {
+          id: Math.random().toString(36).substr(2, 9),
+          sessionId: sessionId!,
+          studentName: name,
+          matricNo: matricNo.toUpperCase(),
+          department: department,
+          timestamp: Date.now(),
+          faceImage: faceImageUrl || faceImage,
+          latitude,
+          longitude,
+          distance
+        };
+
+        try {
+          await submitAttendance(newRecord);
+          localStorage.setItem(deviceLockKey, matricNo.toUpperCase());
+          
+          setStatus('success');
+          setMessage(`Verified! Attendance logged for ${name}.`);
+        } catch (error) {
+          console.error("Error submitting attendance:", error);
+          setStatus('error');
+          setMessage('Failed to save attendance to cloud storage. Please try again.');
+        } finally {
+          setLoading(false);
+        }
+      },
+      (err) => {
+        console.error("Location error:", err);
+        let msg = 'Failed to verify your location. ';
+        if (err.code === 1) msg += 'Permission denied.';
+        else if (err.code === 2) msg += 'Position unavailable.';
+        else if (err.code === 3) msg += 'Location request timed out. Please try again.';
+        
+        setStatus('error');
+        setMessage(msg);
+        setLoading(false);
+      },
+      GEOCONFIG
+    );
   };
 
   if (status === 'expired') {
