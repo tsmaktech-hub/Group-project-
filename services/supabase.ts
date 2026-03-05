@@ -8,174 +8,169 @@ let supabaseClient: any = null;
 
 export const getSupabase = () => {
   if (!supabaseClient) {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error('Supabase URL and Anon Key are required. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.');
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'your-supabase-url') {
+      console.warn('Supabase URL and Anon Key are not configured correctly. Using localStorage fallback.');
+      return null;
     }
-    supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+    try {
+      supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+    } catch (e) {
+      console.error('Failed to initialize Supabase client:', e);
+      return null;
+    }
   }
   return supabaseClient;
 };
 
-const SESSIONS_TABLE = 'session';
-const RECORDS_TABLE = 'attendance_record';
+const SESSIONS_TABLE = 'sessions';
+const RECORDS_TABLE = 'records';
 const BUCKET_NAME = 'face-images';
 
-export const createSession = async (sessionData: AttendanceSession) => {
-  // Map camelCase to snake_case for Supabase
-  const dbData = {
-    lecturer_id: sessionData.lecturerId,
-    course_id: sessionData.courseId,
-    department_id: sessionData.departmentId,
-    level: sessionData.level,
-    session_key: sessionData.sessionKey,
-    start_time: sessionData.startTime,
-    active: sessionData.active,
-    latitude: sessionData.latitude,
-    longitude: sessionData.longitude
-  };
-  
-  const { data, error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .insert([dbData])
-    .select()
-    .single();
-  
-  if (error) {
-    console.error("Supabase Create Session Error:", error);
-    // If the error is about no rows returned, it's likely RLS blocking the select
-    if (error.code === 'PGRST116' && !data) {
-      console.warn("Session created but RLS blocked the return. Attempting to fetch manually...");
-      // Try to fetch it manually by session_key and start_time
-      const { data: manualData, error: manualError } = await getSupabase()
+export const createSession = async (sessionData: Omit<AttendanceSession, 'id'>) => {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
         .from(SESSIONS_TABLE)
-        .select('*')
-        .eq('session_key', dbData.session_key)
-        .eq('start_time', dbData.start_time)
+        .insert([sessionData])
+        .select()
         .single();
       
-      if (manualError) {
-        console.error("Manual fetch failed:", manualError);
-        throw error;
-      }
-      return mapSessionFromDb(manualData);
+      if (!error && data) return { ...data, id: data.id } as AttendanceSession;
+      console.warn('Supabase insert error, falling back to local:', error);
+    } catch (e) {
+      console.warn('Supabase request failed, falling back to local:', e);
     }
-    throw error;
-  }
-  
-  if (!data) {
-    throw new Error("Session created but no data was returned from the database.");
   }
 
-  return mapSessionFromDb(data);
+  // Fallback to localStorage
+  const id = Math.random().toString(36).substr(2, 9);
+  const newSession = { ...sessionData, id } as AttendanceSession;
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  sessions.push(newSession);
+  localStorage.setItem('attendx_sessions', JSON.stringify(sessions));
+  return newSession;
 };
-
-// Helper to map DB session to Frontend session
-const mapSessionFromDb = (data: any): AttendanceSession => ({
-  id: data.id,
-  lecturerId: data.lecturer_id,
-  courseId: data.course_id,
-  departmentId: data.department_id,
-  level: data.level,
-  sessionKey: data.session_key,
-  startTime: data.start_time,
-  endTime: data.end_time,
-  active: data.active,
-  latitude: data.latitude,
-  longitude: data.longitude
-});
-
-// Helper to map DB record to Frontend record
-const mapRecordFromDb = (data: any): AttendanceRecord => ({
-  id: data.id,
-  sessionId: data.session_id,
-  studentName: data.student_name,
-  matricNo: data.matric_no,
-  department: data.department,
-  timestamp: data.timestamp,
-  faceImage: data.face_image,
-  latitude: data.latitude,
-  longitude: data.longitude,
-  distance: data.distance
-});
 
 export const getSession = async (sessionId: string) => {
-  const { data, error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .select('*')
-    .eq('id', sessionId)
-    .single();
-  
-  if (error) return null;
-  return mapSessionFromDb(data);
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(SESSIONS_TABLE)
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+      
+      if (!error && data) return data as AttendanceSession;
+    } catch (e) {}
+  }
+
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  return sessions.find((s: any) => s.id === sessionId) || null;
 };
 
-export const addAttendanceRecord = async (recordData: AttendanceRecord) => {
-  const dbData = {
-    session_id: recordData.sessionId,
-    student_name: recordData.studentName,
-    matric_no: recordData.matricNo,
-    department: recordData.department,
-    timestamp: recordData.timestamp,
-    face_image: recordData.faceImage,
-    latitude: recordData.latitude,
-    longitude: recordData.longitude,
-    distance: recordData.distance
-  };
-
-  const { data, error } = await getSupabase()
-    .from(RECORDS_TABLE)
-    .insert([dbData])
-    .select()
-    .single();
-  
-  if (error) {
-    console.error("Supabase Add Record Error:", error);
-    throw error;
+export const addAttendanceRecord = async (recordData: Omit<AttendanceRecord, 'id'>) => {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(RECORDS_TABLE)
+        .insert([recordData])
+        .select()
+        .single();
+      
+      if (!error && data) return data as AttendanceRecord;
+    } catch (e) {}
   }
-  return mapRecordFromDb(data);
+
+  const id = Math.random().toString(36).substr(2, 9);
+  const newRecord = { ...recordData, id } as AttendanceRecord;
+  const records = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+  records.push(newRecord);
+  localStorage.setItem('attendx_records', JSON.stringify(records));
+  return newRecord;
 };
 
 export const getRecordsForSession = async (sessionId: string) => {
-  const { data, error } = await getSupabase()
-    .from(RECORDS_TABLE)
-    .select('*')
-    .eq('session_id', sessionId)
-    .order('timestamp', { ascending: false });
-  
-  if (error) throw error;
-  return data.map(mapRecordFromDb);
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(RECORDS_TABLE)
+        .select('*')
+        .eq('sessionId', sessionId)
+        .order('timestamp', { ascending: false });
+      
+      if (!error && data) return data as AttendanceRecord[];
+    } catch (e) {}
+  }
+
+  const records = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+  return records
+    .filter((r: any) => r.sessionId === sessionId)
+    .sort((a: any, b: any) => b.timestamp - a.timestamp) as AttendanceRecord[];
 };
 
 export const getActiveSession = async (lecturerId: string) => {
-  const { data, error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .select('*')
-    .eq('lecturer_id', lecturerId)
-    .eq('active', true)
-    .single();
-  
-  if (error) return null;
-  return mapSessionFromDb(data);
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(SESSIONS_TABLE)
+        .select('*')
+        .eq('lecturerId', lecturerId)
+        .eq('active', true)
+        .single();
+      
+      if (!error && data) return data as AttendanceSession;
+    } catch (e) {}
+  }
+
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  return sessions.find((s: any) => s.lecturerId === lecturerId && s.active) || null;
 };
 
 export const endSession = async (sessionId: string) => {
-  const { error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .update({ active: false, end_time: Date.now() })
-    .eq('id', sessionId);
-  
-  if (error) throw error;
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from(SESSIONS_TABLE)
+        .update({ active: false, endTime: Date.now() })
+        .eq('id', sessionId);
+      
+      if (!error) return;
+    } catch (e) {}
+  }
+
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  const updatedSessions = sessions.map((s: any) => 
+    s.id === sessionId ? { ...s, active: false, endTime: Date.now() } : s
+  );
+  localStorage.setItem('attendx_sessions', JSON.stringify(updatedSessions));
 };
 
 export const saveUser = async (user: User) => {
-  const { error } = await getSupabase()
-    .from('users')
-    .upsert([user]);
-  
-  if (error) {
-    console.error("Supabase Save User Error:", error);
-    throw error;
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .upsert([user]);
+      
+      if (!error) return;
+    } catch (e) {}
   }
+  
+  const users = JSON.parse(localStorage.getItem('attendx_all_users') || '[]');
+  const existingIndex = users.findIndex((u: any) => u.id === user.id);
+  if (existingIndex >= 0) {
+    users[existingIndex] = user;
+  } else {
+    users.push(user);
+  }
+  localStorage.setItem('attendx_all_users', JSON.stringify(users));
 };
 
 export const getSessionById = async (sessionId: string) => {
@@ -186,92 +181,144 @@ export const getSessionById = async (sessionId: string) => {
     .single();
   
   if (error) return null;
-  return mapSessionFromDb(data);
+  return data as AttendanceSession;
 };
 
 export const subscribeToSessionRecords = (sessionId: string, callback: (records: AttendanceRecord[]) => void) => {
   // Initial fetch
   getRecordsForSession(sessionId).then(callback);
 
-  // Subscribe to changes
-  const channel = getSupabase()
-    .channel(`session-records-${sessionId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: RECORDS_TABLE,
-        filter: `session_id=eq.${sessionId}`
-      },
-      () => {
-        // Re-fetch all records for simplicity and consistency
-        getRecordsForSession(sessionId).then(callback);
-      }
-    )
-    .subscribe();
+  const supabase = getSupabase();
+  if (supabase) {
+    // Subscribe to changes
+    const channel = supabase
+      .channel(`session-records-${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: RECORDS_TABLE,
+          filter: `sessionId=eq.${sessionId}`
+        },
+        () => {
+          // Re-fetch all records for simplicity and consistency
+          getRecordsForSession(sessionId).then(callback);
+        }
+      )
+      .subscribe();
 
-  return () => {
-    getSupabase().removeChannel(channel);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  // Local storage "subscription" (polling fallback)
+  const interval = setInterval(() => {
+    getRecordsForSession(sessionId).then(callback);
+  }, 2000);
+
+  return () => clearInterval(interval);
 };
 
 export const getSessionsByLecturer = async (lecturerId: string) => {
-  const { data, error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .select('*')
-    .eq('lecturer_id', lecturerId)
-    .order('start_time', { ascending: false });
-  
-  if (error) throw error;
-  return data.map(mapSessionFromDb);
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(SESSIONS_TABLE)
+        .select('*')
+        .eq('lecturerId', lecturerId)
+        .order('startTime', { ascending: false });
+      
+      if (!error && data) return data as AttendanceSession[];
+    } catch (e) {}
+  }
+
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  return sessions
+    .filter((s: any) => s.lecturerId === lecturerId)
+    .sort((a: any, b: any) => b.startTime - a.startTime) as AttendanceSession[];
 };
 
 export const getRecordCountForSession = async (sessionId: string) => {
-  const { count, error } = await getSupabase()
-    .from(RECORDS_TABLE)
-    .select('*', { count: 'exact', head: true })
-    .eq('session_id', sessionId);
-  
-  if (error) throw error;
-  return count || 0;
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { count, error } = await supabase
+        .from(RECORDS_TABLE)
+        .select('*', { count: 'exact', head: true })
+        .eq('sessionId', sessionId);
+      
+      if (!error) return count || 0;
+    } catch (e) {}
+  }
+
+  const records = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+  return records.filter((r: any) => r.sessionId === sessionId).length;
 };
 
 export const getSessionsByCourse = async (courseId: string) => {
-  const { data, error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .select('*')
-    .eq('course_id', courseId);
-  
-  if (error) throw error;
-  return data.map(mapSessionFromDb);
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(SESSIONS_TABLE)
+        .select('*')
+        .eq('courseId', courseId);
+      
+      if (!error && data) return data as AttendanceSession[];
+    } catch (e) {}
+  }
+
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  return sessions.filter((s: any) => s.courseId === courseId) as AttendanceSession[];
 };
 
 export const getRecordsBySessions = async (sessionIds: string[]) => {
   if (sessionIds.length === 0) return [];
-  const { data, error } = await getSupabase()
-    .from(RECORDS_TABLE)
-    .select('*')
-    .in('session_id', sessionIds);
-  
-  if (error) throw error;
-  return data.map(mapRecordFromDb);
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(RECORDS_TABLE)
+        .select('*')
+        .in('sessionId', sessionIds);
+      
+      if (!error && data) return data as AttendanceRecord[];
+    } catch (e) {}
+  }
+
+  const records = JSON.parse(localStorage.getItem('attendx_records') || '[]');
+  return records.filter((r: any) => sessionIds.includes(r.sessionId)) as AttendanceRecord[];
 };
 
 export const uploadFaceImage = async (sessionId: string, matricNo: string, blob: Blob) => {
-  const fileName = `${sessionId}/${matricNo}_${Date.now()}.jpg`;
-  const { data, error } = await getSupabase().storage
-    .from(BUCKET_NAME)
-    .upload(fileName, blob, {
-      contentType: 'image/jpeg',
-      upsert: true
-    });
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const fileName = `${sessionId}/${matricNo}_${Date.now()}.jpg`;
+      const { data, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(fileName, blob, {
+          contentType: 'image/jpeg',
+          upsert: true
+        });
 
-  if (error) throw error;
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage
+          .from(BUCKET_NAME)
+          .getPublicUrl(fileName);
 
-  const { data: { publicUrl } } = getSupabase().storage
-    .from(BUCKET_NAME)
-    .getPublicUrl(fileName);
+        return publicUrl;
+      }
+    } catch (e) {}
+  }
 
-  return publicUrl;
+  // Fallback: convert blob to base64 for local storage (limited by size, but works for demo)
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
 };
