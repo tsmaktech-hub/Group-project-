@@ -8,14 +8,14 @@ let supabaseClient: any = null;
 
 export const getSupabase = () => {
   if (!supabaseClient) {
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'your-supabase-url') {
-      console.warn('Supabase URL and Anon Key are not configured correctly. Using localStorage fallback.');
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('your-supabase-url') || !supabaseUrl.startsWith('http')) {
+      console.warn('Supabase is not configured. The app is running in LOCAL MODE. Data will NOT sync across devices.');
       return null;
     }
     try {
       supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
     } catch (e) {
-      console.error('Failed to initialize Supabase client:', e);
+      console.error('Supabase initialization failed:', e);
       return null;
     }
   }
@@ -53,21 +53,7 @@ export const createSession = async (sessionData: Omit<AttendanceSession, 'id'>) 
 };
 
 export const getSession = async (sessionId: string) => {
-  const supabase = getSupabase();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from(SESSIONS_TABLE)
-        .select('*')
-        .eq('id', sessionId)
-        .single();
-      
-      if (!error && data) return data as AttendanceSession;
-    } catch (e) {}
-  }
-
-  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
-  return sessions.find((s: any) => s.id === sessionId) || null;
+  return getSessionById(sessionId);
 };
 
 export const addAttendanceRecord = async (recordData: Omit<AttendanceRecord, 'id'>) => {
@@ -174,14 +160,21 @@ export const saveUser = async (user: User) => {
 };
 
 export const getSessionById = async (sessionId: string) => {
-  const { data, error } = await getSupabase()
-    .from(SESSIONS_TABLE)
-    .select('*')
-    .eq('id', sessionId)
-    .single();
-  
-  if (error) return null;
-  return data as AttendanceSession;
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(SESSIONS_TABLE)
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+      
+      if (!error && data) return data as AttendanceSession;
+    } catch (e) {}
+  }
+
+  const sessions = JSON.parse(localStorage.getItem('attendx_sessions') || '[]');
+  return sessions.find((s: any) => s.id === sessionId) || null;
 };
 
 export const subscribeToSessionRecords = (sessionId: string, callback: (records: AttendanceRecord[]) => void) => {

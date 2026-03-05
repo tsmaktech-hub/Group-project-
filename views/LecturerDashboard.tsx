@@ -5,6 +5,7 @@ import { Layout } from '../components/Layout';
 import { User, AttendanceSession } from '../types';
 import { DEPARTMENTS, COURSES, LEVELS, GEOCONFIG } from '../constants';
 import { ResetConfirmation } from '../components/ResetConfirmation';
+import { getSupabase } from '../services/supabase';
 
 interface LecturerDashboardProps {
   user: User | null;
@@ -13,11 +14,11 @@ interface LecturerDashboardProps {
 }
 
 export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLogout, onStartSession }) => {
+  const isCloudConnected = !!getSupabase();
   const [selectedDept, setSelectedDept] = useState('');
   const [selectedLevel, setSelectedLevel] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [loading, setLoading] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
   const [error, setError] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
 
@@ -30,32 +31,18 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
     }
 
     setLoading(true);
-    setLocationLoading(true);
     setError('');
 
     if (!navigator.geolocation) {
       setError('Geolocation is not supported by your browser.');
       setLoading(false);
-      setLocationLoading(false);
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const { latitude, longitude } = position.coords;
-        
-        // Helper to generate a robust 6-digit alphanumeric key
-        const generateKey = () => {
-          const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-          let result = '';
-          for (let i = 0; i < 6; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-          }
-          return result;
-        };
-
-        const sessionKey = generateKey();
-        const sessionId = Math.random().toString(36).substring(2, 11);
+        const sessionKey = Math.random().toString(36).substr(2, 6).toUpperCase();
+        const sessionId = Math.random().toString(36).substr(2, 9);
         
         const newSession: AttendanceSession = {
           id: sessionId,
@@ -65,28 +52,21 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
           level: selectedLevel,
           sessionKey,
           startTime: Date.now(),
-          active: true,
-          latitude,
-          longitude
+          location: {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          },
+          radius: GEOCONFIG.DEFAULT_RADIUS,
+          active: true
         };
 
         onStartSession(newSession);
         setLoading(false);
-        setLocationLoading(false);
       },
       (err) => {
-        console.error("Location error:", err);
-        let msg = 'Failed to get your location. ';
-        if (err.code === 1) msg += 'Permission denied.';
-        else if (err.code === 2) msg += 'Position unavailable.';
-        else if (err.code === 3) msg += 'Location request timed out. Please try again.';
-        else msg += 'Unknown error.';
-        
-        setError(msg);
+        setError('Failed to get your location. Please enable location services.');
         setLoading(false);
-        setLocationLoading(false);
-      },
-      GEOCONFIG
+      }
     );
   };
 
@@ -109,6 +89,17 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
             </h2>
 
             <div className="space-y-6">
+              {!isCloudConnected && (
+                <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl flex items-start space-x-3">
+                  <i className="fas fa-exclamation-triangle text-yellow-600 mt-1"></i>
+                  <div>
+                    <h4 className="text-xs font-black text-yellow-700 uppercase tracking-widest">Local Mode Active</h4>
+                    <p className="text-[11px] text-yellow-600 leading-relaxed mt-1">
+                      Supabase is not configured. Sessions will only be visible on <strong>this browser</strong>. Students on other devices will see "Session Unavailable".
+                    </p>
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">College</label>
                 <div className="w-full px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl text-gray-600 font-medium">
@@ -175,10 +166,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user, onLo
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center space-x-2 text-lg"
               >
                 {loading ? (
-                  <>
-                    <i className="fas fa-circle-notch fa-spin"></i>
-                    <span>{locationLoading ? 'Getting Location...' : 'Starting Session...'}</span>
-                  </>
+                  <i className="fas fa-circle-notch fa-spin"></i>
                 ) : (
                   <>
                     <i className="fas fa-satellite-dish"></i>

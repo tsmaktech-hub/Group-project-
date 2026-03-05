@@ -228,6 +228,17 @@ export const StudentPortal: React.FC = () => {
     );
   };
 
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs font-black text-blue-600 uppercase tracking-widest">Connecting to Cloud...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (status === 'expired') {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
@@ -250,7 +261,8 @@ export const StudentPortal: React.FC = () => {
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm">
           <i className="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
-          <h2 className="text-xl font-bold">Session Unavailable</h2>
+          <h2 className="text-xl font-bold">{status === 'error' ? 'Connection Error' : 'Session Unavailable'}</h2>
+          <p className="text-gray-500 text-sm mt-2">{message || 'This session could not be found or is no longer active.'}</p>
           <button onClick={() => window.location.reload()} className="mt-6 text-blue-600 font-bold uppercase text-xs tracking-widest">Retry Connection</button>
         </div>
       </div>
